@@ -32,8 +32,8 @@ import (
 var (
 	queryPreviewSourceCmd = &cobra.Command{
 		Use:   "preview-source <datasource_id>",
-		Short: "Preview Lacework query data source",
-		Long:  `Preview Lacework query data source.`,
+		Short: "Preview Lacework query datasource",
+		Long:  `Preview Lacework query datasource.`,
 		Args:  cobra.ExactArgs(1),
 		RunE:  previewQuerySource,
 	}
@@ -52,7 +52,7 @@ func previewQuerySource(_ *cobra.Command, args []string) error {
 	cli.StopProgress()
 
 	if err != nil {
-		return errors.Wrap(err, "unable to retrieve data source")
+		return errors.Wrap(err, "unable to retrieve datasource")
 	}
 
 	// build returns list from datasource fields
@@ -61,8 +61,11 @@ func previewQuerySource(_ *cobra.Command, args []string) error {
 		returns = append(returns, ret.Name)
 	}
 	if len(returns) == 0 {
-		return errors.New("unable to parse data source schema")
+		return errors.New("unable to parse datasource schema")
 	}
+
+	// initialize limit
+	limit := 1
 
 	// initialize query
 	executeQuery := api.ExecuteQueryRequest{
@@ -70,6 +73,7 @@ func previewQuerySource(_ *cobra.Command, args []string) error {
 			QueryText: fmt.Sprintf(
 				queryPreviewSourceTemplate, args[0], strings.Join(returns, ",")),
 		},
+		Options: api.ExecuteQueryOptions{Limit: &limit},
 	}
 
 	// initialize time attempts
@@ -84,11 +88,11 @@ func previewQuerySource(_ *cobra.Command, args []string) error {
 		end, _ := lwtime.ParseRelative(timeAttempt["end"])
 
 		executeQuery.Arguments = []api.ExecuteQueryArgument{
-			api.ExecuteQueryArgument{
+			{
 				Name:  api.QueryStartTimeRange,
 				Value: start.UTC().Format(lwtime.RFC3339Milli),
 			},
-			api.ExecuteQueryArgument{
+			{
 				Name:  api.QueryEndTimeRange,
 				Value: end.UTC().Format(lwtime.RFC3339Milli),
 			},
@@ -100,7 +104,7 @@ func previewQuerySource(_ *cobra.Command, args []string) error {
 		response, err := cli.LwApi.V2.Query.Execute(executeQuery)
 		cli.StopProgress()
 		if err != nil {
-			return errors.Wrap(err, "unable to preview data source")
+			return errors.Wrap(err, "unable to preview datasource")
 		}
 
 		if len(response.Data) == 0 {
@@ -108,6 +112,6 @@ func previewQuerySource(_ *cobra.Command, args []string) error {
 		}
 		return cli.OutputJSON(response.Data[0])
 	}
-	cli.OutputHuman("No results found for data source")
+	cli.OutputHuman("No results found for datasource\n")
 	return nil
 }

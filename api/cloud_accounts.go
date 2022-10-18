@@ -87,6 +87,8 @@ const (
 	AwsCfgCloudAccount
 	AwsCtSqsCloudAccount
 	AwsEksAuditCloudAccount
+	AwsSidekickCloudAccount
+	AwsSidekickOrgCloudAccount
 	AwsUsGovCfgCloudAccount
 	AwsUsGovCtSqsCloudAccount
 	AzureAlSeqCloudAccount
@@ -98,17 +100,19 @@ const (
 
 // CloudAccountTypes is the list of available Cloud Account integration types
 var CloudAccountTypes = map[cloudAccountType]string{
-	NoneCloudAccount:          "None",
-	AwsCfgCloudAccount:        "AwsCfg",
-	AwsCtSqsCloudAccount:      "AwsCtSqs",
-	AwsEksAuditCloudAccount:   "AwsEksAudit",
-	AwsUsGovCfgCloudAccount:   "AwsUsGovCfg",
-	AwsUsGovCtSqsCloudAccount: "AwsUsGovCtSqs",
-	AzureAlSeqCloudAccount:    "AzureAlSeq",
-	AzureCfgCloudAccount:      "AzureCfg",
-	GcpAtSesCloudAccount:      "GcpAtSes",
-	GcpCfgCloudAccount:        "GcpCfg",
-	GcpGkeAuditCloudAccount:   "GcpGkeAudit",
+	NoneCloudAccount:           "None",
+	AwsCfgCloudAccount:         "AwsCfg",
+	AwsCtSqsCloudAccount:       "AwsCtSqs",
+	AwsEksAuditCloudAccount:    "AwsEksAudit",
+	AwsSidekickCloudAccount:    "AwsSidekick",
+	AwsSidekickOrgCloudAccount: "AwsSidekickOrg",
+	AwsUsGovCfgCloudAccount:    "AwsUsGovCfg",
+	AwsUsGovCtSqsCloudAccount:  "AwsUsGovCtSqs",
+	AzureAlSeqCloudAccount:     "AzureAlSeq",
+	AzureCfgCloudAccount:       "AzureCfg",
+	GcpAtSesCloudAccount:       "GcpAtSes",
+	GcpCfgCloudAccount:         "GcpCfg",
+	GcpGkeAuditCloudAccount:    "GcpGkeAudit",
 }
 
 // String returns the string representation of a Cloud Account integration type
@@ -181,6 +185,14 @@ func (svc *CloudAccountsService) Get(guid string, response interface{}) error {
 type CloudAccountRaw struct {
 	v2CommonIntegrationData
 	Data interface{} `json:"data,omitempty"`
+}
+
+func (cloud CloudAccountRaw) GetData() any {
+	return cloud.Data
+}
+
+func (cloud CloudAccountRaw) GetCommon() v2CommonIntegrationData {
+	return cloud.v2CommonIntegrationData
 }
 
 func (cloud CloudAccountRaw) CloudAccountType() cloudAccountType {

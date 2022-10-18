@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"testing"
 
 	"github.com/lacework/go-sdk/api"
@@ -31,11 +32,11 @@ import (
 
 var (
 	executeQueryArguments = []api.ExecuteQueryArgument{
-		api.ExecuteQueryArgument{
+		{
 			Name:  api.QueryStartTimeRange,
 			Value: "2021-07-11T00:00:00.000Z",
 		},
-		api.ExecuteQueryArgument{
+		{
 			Name:  api.QueryEndTimeRange,
 			Value: "2021-07-12T00:00:00.000Z",
 		},
@@ -46,15 +47,42 @@ var (
 		},
 		Arguments: executeQueryArguments,
 	}
+	executeQueryBadOptions = api.ExecuteQueryRequest{
+		Query: api.ExecuteQuery{
+			QueryText: newQueryText,
+		},
+		Options:   api.ExecuteQueryOptions{Limit: &limitZero},
+		Arguments: executeQueryArguments,
+	}
+	executeQueryBadArguments = api.ExecuteQueryRequest{
+		Query: api.ExecuteQuery{
+			QueryText: newQueryText,
+		},
+		Arguments: []api.ExecuteQueryArgument{
+			{
+				Name:  api.QueryStartTimeRange,
+				Value: "2021-07-12T00:00:00.000Z",
+			},
+			{
+				Name:  api.QueryEndTimeRange,
+				Value: "2021-07-11T00:00:00.000Z",
+			},
+		},
+	}
 	executeQueryByID = api.ExecuteQueryByIDRequest{
 		QueryID:   queryID,
 		Arguments: executeQueryArguments,
 	}
-	executeQueryData = `[
+	pidHash          = 5644915113269064637
+	executeQueryData = fmt.Sprintf(`[
 	{
-		"INSERT_ID": "35308423"
+		"INSERT_ID": "35308423",
+		"PID_HASH": %d
 	}
-]`
+]`, pidHash)
+	limitZero = 0
+	limitNeg  = -1
+	limitOne  = 1
 )
 
 func TestQueryExecuteMethod(t *testing.T) {
@@ -106,6 +134,35 @@ func TestQueryExecuteOK(t *testing.T) {
 	assert.Nil(t, err)
 
 	assert.Equal(t, runExpected, runActual)
+	// test unmarshal of large integer
+	dataActual := runActual.Data[0].(map[string]interface{})
+	assert.Equal(t, json.Number(strconv.Itoa(pidHash)), dataActual["PID_HASH"])
+}
+
+func TestQueryExecuteBad(t *testing.T) {
+	mockResponse := mockQueryDataResponse(executeQueryData)
+
+	fakeServer := lacework.MockServer()
+	fakeServer.UseApiV2()
+	fakeServer.MockAPI(
+		"Queries/execute",
+		func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprint(w, mockResponse)
+		},
+	)
+	defer fakeServer.Close()
+
+	c, err := api.NewClient("test",
+		api.WithToken("TOKEN"),
+		api.WithURL(fakeServer.URL()),
+	)
+	assert.Nil(t, err)
+
+	var runExpected api.ExecuteQueryResponse
+	_ = json.Unmarshal([]byte(mockResponse), &runExpected)
+
+	_, err = c.V2.Query.Execute(executeQueryBadArguments)
+	assert.NotNil(t, err)
 }
 
 func TestQueryExecuteError(t *testing.T) {
@@ -178,6 +235,32 @@ func TestQueryExecuteByIDOK(t *testing.T) {
 	assert.Nil(t, err)
 
 	assert.Equal(t, runExpected, runActual)
+}
+
+func TestQueryExecuteByIDBad(t *testing.T) {
+	mockResponse := mockQueryDataResponse(executeQueryData)
+
+	fakeServer := lacework.MockServer()
+	fakeServer.UseApiV2()
+	fakeServer.MockAPI(
+		"Queries/execute",
+		func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprint(w, mockResponse)
+		},
+	)
+	defer fakeServer.Close()
+
+	c, err := api.NewClient("test",
+		api.WithToken("TOKEN"),
+		api.WithURL(fakeServer.URL()),
+	)
+	assert.Nil(t, err)
+
+	var runExpected api.ExecuteQueryResponse
+	_ = json.Unmarshal([]byte(mockResponse), &runExpected)
+
+	_, err = c.V2.Query.Execute(executeQueryBadArguments)
+	assert.NotNil(t, err)
 }
 
 func TestQueryExecuteByIDError(t *testing.T) {

@@ -1,3 +1,107 @@
+# v0.42.0
+
+## Features
+* feat(cli): alert-channel cmd & container-registry cmd (#904) (Darren)([bdb6317](https://github.com/lacework/go-sdk/commit/bdb63178d5b421bea431c12839974b358d254fc2))
+## Refactor
+* refactor(chocolatey): address moderation requested changes (#906) (Darren)([e33ecfc](https://github.com/lacework/go-sdk/commit/e33ecfc5d721960a2bf9d9ad3e01cc2fbcfa84e3))
+## Other Changes
+* chore(deps): bump github.com/kyokomi/emoji/v2 from 2.2.9 to 2.2.10 (#884) (dependabot[bot])([bee54a0](https://github.com/lacework/go-sdk/commit/bee54a0b0301b836f04210133c9f8ec8f83887c9))
+* chore(deps): bump github.com/zclconf/go-cty from 1.10.0 to 1.11.0 (#894) (dependabot[bot])([0436d26](https://github.com/lacework/go-sdk/commit/0436d26123b40a5c4615188bec2fbc024b400b92))
+* ci: version bump to v0.41.2-dev (Lacework)([0e6cd1e](https://github.com/lacework/go-sdk/commit/0e6cd1e8adb1b5da2be63785e7166e2d8596b583))
+---
+# v0.41.1
+
+## Other Changes
+* build(cli): detect when signing process has completed (#902) (Salim Afiune)([05bca71](https://github.com/lacework/go-sdk/commit/05bca713ac5eaddbc080b5eac2ef3090c65f48e5))
+* ci: version bump to v0.41.1-dev (Lacework)([d176ac5](https://github.com/lacework/go-sdk/commit/d176ac5c30a0963752e993816aa2be5c8418f405))
+---
+# v0.41.0
+
+## Features
+* feat(cli): aws compliance search command (#893) (Darren)([5c665cb](https://github.com/lacework/go-sdk/commit/5c665cba2bc0d7f89c669d6096d3f60932eb8d2d))
+* feat(cli): Addition of extra AWS terraform options (#890) (djmctavish)([de34097](https://github.com/lacework/go-sdk/commit/de34097c80f239e51335a33655ef89f35f5b7c06))
+* feat(api): add v2 AwsCfg (#889) (Darren)([53bd1ca](https://github.com/lacework/go-sdk/commit/53bd1ca21bd5d6e4893397ffad14403154f184d9))
+* feat: DataExportRule service (#887) (Darren)([9c6ca08](https://github.com/lacework/go-sdk/commit/9c6ca082f9ae0131bb2c3b0d65aec9fb51b4e6b6))
+* feat: add credentials to sidekick data (#886) (Darren)([3311753](https://github.com/lacework/go-sdk/commit/331175320a594ef4a4646cf2ebdd5b8c06eee407))
+## Refactor
+* refactor(cli): migrate fetch accountIds in policy exception to API v2 (#896) (Darren)([510a41f](https://github.com/lacework/go-sdk/commit/510a41f0bdb6ba9e8d3df24db55c691ce0349fa0))
+## Bug Fixes
+* fix: omitempty profileVersions field (#897) (Darren)([2170edb](https://github.com/lacework/go-sdk/commit/2170edb47e5353597149c6208fedbe7604fd7a4f))
+* fix(cli): account flag domain fix (#895) (jonathan stewart)([ed892dc](https://github.com/lacework/go-sdk/commit/ed892dc23bbef80eda97985ad1fc9c385ace4260))
+* fix: add description field to dataexportrules (#891) (Darren)([0531907](https://github.com/lacework/go-sdk/commit/05319072e362cfc258b9555c52953138a62d9953))
+* fix(lwupdater): avoid comparing dev versions (#881) (Salim Afiune)([a8f9ee4](https://github.com/lacework/go-sdk/commit/a8f9ee444c9899768b57fe510308878e2d6aa13c))
+* fix: alert profile filter (#883) (Darren)([91e979a](https://github.com/lacework/go-sdk/commit/91e979a12156c5fced9fa9cf7490d6499ff87bb9))
+## Documentation Updates
+* docs(cli): display IaC default output location (#898) (sthetland)([139da68](https://github.com/lacework/go-sdk/commit/139da68fb6ec1033b1ecefe8a8295e08e955404e))
+## Other Changes
+* build(cli): sign Lacework CLI artifacts (#899) (Salim Afiune)([dcc4605](https://github.com/lacework/go-sdk/commit/dcc460567947f316d7eeb7dcda2406813cf83dc3))
+* ci: fix policy test (#888) (Salim Afiune)([294f99b](https://github.com/lacework/go-sdk/commit/294f99b9e9767aea33450b561a46e78231f1bf4a))
+* ci: version bump to v0.40.1-dev (Lacework)([599d7ff](https://github.com/lacework/go-sdk/commit/599d7ff61c0a21c961862d633d11f9c450cfc471))
+---
+# v0.40.0
+
+## Features
+* feat(cli): alert-profile update cmd (#879) (Darren)([d8024e5](https://github.com/lacework/go-sdk/commit/d8024e5aad8ea7e240d2be2a65680351678034ce))
+* feat(cdk): leave breadcrumbs after installation and update (#876) (Salim Afiune)([d16cc15](https://github.com/lacework/go-sdk/commit/d16cc153cc6483dd20e05bfd3035f5a0445ef17a))
+* feat(lql): add limit option (hazedav)([d598def](https://github.com/lacework/go-sdk/commit/d598deff17ae4b644cc655c084e96fa6b5d70ad4))
+* feat: add cloud account integration aws agentless scanning (#870) (Darren)([8807a97](https://github.com/lacework/go-sdk/commit/8807a97ac04a9d2637947a6b74b5f6bfd148e91e))
+## Refactor
+* refactor: use v2/AgentInfo for agents list command (#866) (Darren)([06531ed](https://github.com/lacework/go-sdk/commit/06531ed7ebcc8fba41d95dd998aa2e8d0125aa7c))
+## Bug Fixes
+* fix(lql): add line break when no preview found (#880) (hazedav)([83a1216](https://github.com/lacework/go-sdk/commit/83a1216a20162af5fdc4c30c5f0572d65a773e64))
+* fix(cdk): JSON output for 'component list' command (#878) (Salim Afiune)([a1dc162](https://github.com/lacework/go-sdk/commit/a1dc162441b5ac849010dc87b5a09fbce3f13d16))
+* fix(api): detect FQDN as account in api.NewClient() (#872) (Salim Afiune)([6e14d57](https://github.com/lacework/go-sdk/commit/6e14d577fc28f6e5b4eabbda0fe5f08d080e4473))
+* fix: vulnerabilty_exception fixable parameter omit when unset (#863) (Darren)([f517e0e](https://github.com/lacework/go-sdk/commit/f517e0e48fe6cf0ac8f05d59d65c25dc4dbb7ddd))
+* fix(install.ps1): modify User $Path correctly (#869) (Salim Afiune)([73c69f7](https://github.com/lacework/go-sdk/commit/73c69f74a4215799f9826d14badaa5214150ba97))
+## Documentation Updates
+* docs(cli): update help message from LPP commands (#873) (lacework-aaronscheiber)([810d005](https://github.com/lacework/go-sdk/commit/810d0056decf864ab8cd522c2f571475b825a76b))
+* docs(cli): updating help for query run (#864) (hazedav)([8953d19](https://github.com/lacework/go-sdk/commit/8953d19f8538b6247f0018d66777ed891eb50c51))
+## Other Changes
+* chore(deps): bump github.com/honeycombio/libhoney-go (#867) (dependabot[bot])([e77d133](https://github.com/lacework/go-sdk/commit/e77d133e3d7564de0fae979b08d8fbfe05221cf4))
+* chore(deps): bump github.com/BurntSushi/toml from 1.1.0 to 1.2.0 (#871) (dependabot[bot])([fa69c24](https://github.com/lacework/go-sdk/commit/fa69c24b079e09ac4012a8beca22947cc01ce686))
+* chore(lql): fully remove evaluatorId (#865) (hazedav)([1112f55](https://github.com/lacework/go-sdk/commit/1112f55c47577591d94cd7719ab66c07f51f21e4))
+* ci: version bump to v0.39.1-dev (Lacework)([23827ee](https://github.com/lacework/go-sdk/commit/23827ee45a92c9c23784af1e61967eff6ef9dae9))
+---
+# v0.39.0
+
+## Features
+* feat(cli): colorize CDK commands (#859) (Salim Afiune)([41e0785](https://github.com/lacework/go-sdk/commit/41e07854448b5053312bc57791c3b20a7aa4de60))
+* feat(cli): fetch existing policy for cli update (#841) (Darren)([8bc93ba](https://github.com/lacework/go-sdk/commit/8bc93baa67e3f8f063afc9b4f05199801cd8c170))
+* feat(cli): new policy-exceptions command (#844) (Darren)([7e894c9](https://github.com/lacework/go-sdk/commit/7e894c9d5d2f3d550f3d117db684a6116e851ecd))
+* feat(cli): include status in vuln ctr scan assesment output (#853) (Darren)([5ff586c](https://github.com/lacework/go-sdk/commit/5ff586cb3a12c6f60fa79164b6a3d3e74461d6f4))
+* feat(cli): display CDK version (Salim Afiune Maya)([d21bbef](https://github.com/lacework/go-sdk/commit/d21bbefeb4da27cc3036d1981c0bec44ec88d97a))
+* feat(cdk): life cycle event 'cdk-init' (Salim Afiune Maya)([12eee01](https://github.com/lacework/go-sdk/commit/12eee017c12145c6bc315050803e9f15f04a651e))
+* feat: support inline scanner integrations (Salim Afiune Maya)([99aacd8](https://github.com/lacework/go-sdk/commit/99aacd80e2a451f2286f49d6cd2079adf3a87105))
+## Bug Fixes
+* fix: omit vulnerability_exception fixable parameter when unset (#857) (Darren)([e671857](https://github.com/lacework/go-sdk/commit/e6718576f977a79bdef231c164c60d0717df290d))
+* fix(cli): use proper env var name LW_API_TOKEN (#856) (Salim Afiune)([22efef4](https://github.com/lacework/go-sdk/commit/22efef47783986824d3c404cee86484660ca7ff4))
+* fix(cli): install.ps1 avoid Windows agent collision (#854) (Salim Afiune)([1d52d27](https://github.com/lacework/go-sdk/commit/1d52d27057cf3e4f99896509db26a6cf2704ecc6))
+## Documentation Updates
+* docs(api): fix path to examples in readme (#858) (Yasmine Hal)([a8a5feb](https://github.com/lacework/go-sdk/commit/a8a5febb8a8cdd373e4e07cde64041f4d0abbd4f))
+## Other Changes
+* chore(cli): update content-library component name  (#855) (hazedav)([2794070](https://github.com/lacework/go-sdk/commit/27940704c140ca229235f8fc1ac8b1c81f1ad269))
+* ci: version bump to v0.38.1-dev (Lacework)([196406a](https://github.com/lacework/go-sdk/commit/196406aedce90674661551ac146f6cdec2d8d634))
+---
+# v0.38.0
+
+## Features
+* feat: chocolatey package scripts (#832) (Darren)([22c1005](https://github.com/lacework/go-sdk/commit/22c1005f64c6a7cb81957eeb06961b5de2856575))
+## Refactor
+* refactor: policy exception constraint type (#842) (Darren)([88bfdb5](https://github.com/lacework/go-sdk/commit/88bfdb58eb73abf00bacc797075aa4350cda0683))
+## Bug Fixes
+* fix(cli): subtract 1 minute from machine details end time (#848) (Darren)([c53388f](https://github.com/lacework/go-sdk/commit/c53388f794ae9b3b9690728fed76c75c9749862a))
+* fix(cli): Fix icon, desc and summary of .nuspec file (#843) (Darren)([0c5c456](https://github.com/lacework/go-sdk/commit/0c5c45689742903c47632b167d44388ebff9af9d))
+## Other Changes
+* chore(deps): bump github.com/hashicorp/hcl/v2 from 2.12.0 to 2.13.0 (#840) (dependabot[bot])([77d78f0](https://github.com/lacework/go-sdk/commit/77d78f0c996aedaf595d2f9bd7e90cc398ad0256))
+* chore(deps): bump github.com/hashicorp/terraform-exec (#845) (dependabot[bot])([9db51aa](https://github.com/lacework/go-sdk/commit/9db51aa8aff39b7f2090d638760c4791780d0cc0))
+* chore(deps): bump github.com/abiosoft/colima from 0.4.2 to 0.4.4 (#849) (dependabot[bot])([0b1b60e](https://github.com/lacework/go-sdk/commit/0b1b60e18d9164a2ba3b575e72610a434b0380c1))
+* chore(deps): bump github.com/stretchr/testify from 1.7.5 to 1.8.0 (#846) (dependabot[bot])([ba2cdbf](https://github.com/lacework/go-sdk/commit/ba2cdbf0a4316bf33c192e5fd7981f389c8ce0b9))
+* chore(deps): bump github.com/hashicorp/go-version from 1.5.0 to 1.6.0 (#847) (dependabot[bot])([b8b232e](https://github.com/lacework/go-sdk/commit/b8b232e999086b23b79b9267e9d74099200d5a37))
+* chore(deps): bump github.com/hashicorp/terraform-exec (#837) (dependabot[bot])([c7b06b6](https://github.com/lacework/go-sdk/commit/c7b06b6f42546e4c9455886779e08e750dabe292))
+* chore(deps): bump github.com/hashicorp/hc-install from 0.3.2 to 0.4.0 (#836) (dependabot[bot])([2e388bd](https://github.com/lacework/go-sdk/commit/2e388bda6f5666c752db824335143df0ec8bd4ac))
+* chore(deps): bump github.com/stretchr/testify from 1.7.3 to 1.7.5 (#838) (dependabot[bot])([d3d0ef7](https://github.com/lacework/go-sdk/commit/d3d0ef772df59d52af1034ab83f70749a4fa8410))
+* ci: version bump to v0.37.1-dev (Lacework)([841d251](https://github.com/lacework/go-sdk/commit/841d251b3def5e8c2cb4bd0f51bc49b4602b5df6))
+---
 # v0.37.0
 
 ## Features

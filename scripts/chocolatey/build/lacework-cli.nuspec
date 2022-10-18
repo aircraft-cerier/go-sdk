@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Do not remove this test for UTF-8: if “Ω” doesn’t appear as greek uppercase omega letter enclosed in quotation marks, you should use an editor that supports UTF-8, not this one. -->
+<package xmlns="http://schemas.microsoft.com/packaging/2010/07/nuspec.xsd">
+    <metadata>
+        <id>lacework-cli</id>
+        <title>Lacework CLI</title>
+        <version>${version}</version>
+        <authors>Lacework</authors>
+        <owners>Salim Afiune Maya, Darren Murray</owners>
+        <summary>A tool to manage the Lacework cloud security platform.</summary>
+        <description>The Lacework CLI is an [open source project](https://github.com/lacework/go-sdk/tree/main/cli) written in Golang and released as separate binaries for Linux, macOS, and, yes, even Windows! Additionally, all releases of the CLI are published as [Docker containers to Docker Hub](https://hub.docker.com/r/lacework/lacework-cli) for various platforms with the intended purpose of integrating with CI/CD automation pipelines.
+
+Lacework as a platform provides a set of robust APIs for configuring accounts within the platform, as well as accessing
+data from accounts. The Lacework CLI provides an interface to those APIs with the goal of providing fast, accurate, and
+actionable insights into the platform.
+
+For more details, go to https://docs.lacework.com/cli
+        </description>
+        <projectUrl>https://github.com/lacework/go-sdk</projectUrl>
+        <tags>lacework cli cloud security</tags>
+        <copyright>Lacework</copyright>
+        <licenseUrl>https://raw.githubusercontent.com/lacework/go-sdk/main/LICENSE</licenseUrl>
+        <requireLicenseAcceptance>false</requireLicenseAcceptance>
+        <iconUrl>https://cdn.statically.io/gh/lacework/go-sdk/main/scripts/chocolatey/lacework.png</iconUrl>
+        <packageSourceUrl>https://github.com/lacework/go-sdk</packageSourceUrl>
+        <docsUrl>https://docs.lacework.com/cli/</docsUrl>
+        <bugTrackerUrl>https://github.com/lacework/go-sdk/issues</bugTrackerUrl>
+        <projectSourceUrl>https://github.com/lacework/go-sdk</projectSourceUrl>
+        <releaseNotes>https://github.com/lacework/go-sdk/releases</releaseNotes>
+    </metadata>
+    <files>
+        <file src="tools\*.*" target="tools"/>
+    </files>
+</package>

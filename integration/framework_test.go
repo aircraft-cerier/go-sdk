@@ -155,6 +155,15 @@ func runLaceworkCLIFromCmd(cmd *exec.Cmd) (int, error) {
 	return 0, nil
 }
 
+func Version(t *testing.T) string {
+	repoVersion, err := ioutil.ReadFile("../VERSION")
+	if err != nil {
+		t.Logf("Unable to read VERSION file, error: '%s'", err.Error())
+		t.Fail()
+	}
+	return string(repoVersion)
+}
+
 func findLaceworkCLIBinary() string {
 	if bin := os.Getenv("LW_CLI_BIN"); bin != "" {
 		return bin
@@ -358,5 +367,49 @@ func expectString(t *testing.T, c *expect.Console, str string) {
 		fmt.Println(out)
 		fmt.Println(err)
 		t.FailNow()
+	}
+}
+
+type MsgRspHandler interface {
+	handle(t *testing.T, c *expect.Console)
+}
+
+type MsgOnly struct {
+	message string
+}
+
+func (m MsgOnly) handle(t *testing.T, c *expect.Console) {
+	expectString(t, c, m.message)
+}
+
+type MsgMenu struct {
+	message string
+	count   int
+}
+
+func (m MsgMenu) handle(t *testing.T, c *expect.Console) {
+	expectString(t, c, m.message)
+
+	for i := 0; i < m.count; i++ {
+		c.Send("\x1B[B")
+	}
+
+	c.SendLine("")
+}
+
+type MsgRsp struct {
+	message  string
+	response string
+}
+
+func (m MsgRsp) handle(t *testing.T, c *expect.Console) {
+	expectString(t, c, m.message)
+
+	c.SendLine(m.response)
+}
+
+func expectsCliOutput(t *testing.T, c *expect.Console, m []MsgRspHandler) {
+	for _, elm := range m {
+		elm.handle(t, c)
 	}
 }

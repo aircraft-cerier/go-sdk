@@ -19,6 +19,8 @@
 package api
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"time"
@@ -28,8 +30,7 @@ import (
 )
 
 type ExecuteQuery struct {
-	QueryText   string `json:"queryText"`
-	EvaluatorID string `json:"evaluatorId,omitempty"`
+	QueryText string `json:"queryText"`
 }
 
 type ExecuteQueryArgumentName string
@@ -39,6 +40,10 @@ const (
 	QueryEndTimeRange   ExecuteQueryArgumentName = "EndTimeRange"
 )
 
+type ExecuteQueryOptions struct {
+	Limit *int `json:"limit,omitempty"`
+}
+
 type ExecuteQueryArgument struct {
 	Name  ExecuteQueryArgumentName `json:"name"`
 	Value string                   `json:"value"`
@@ -46,18 +51,32 @@ type ExecuteQueryArgument struct {
 
 type ExecuteQueryRequest struct {
 	Query     ExecuteQuery           `json:"query"`
+	Options   ExecuteQueryOptions    `json:"options"`
 	Arguments []ExecuteQueryArgument `json:"arguments"`
 }
 
 type ExecuteQueryByIDRequest struct {
 	QueryID   string                 `json:"queryId,omitempty"`
+	Options   ExecuteQueryOptions    `json:"options"`
 	Arguments []ExecuteQueryArgument `json:"arguments"`
 }
 
+type ExecuteQueryData []interface{}
+
+func (d *ExecuteQueryData) UnmarshalJSON(data []byte) error {
+	type Alias ExecuteQueryData
+
+	temp := (*Alias)(d)
+	reader := bytes.NewReader(data)
+	decoder := json.NewDecoder(reader)
+	decoder.UseNumber()
+	return decoder.Decode(temp)
+}
+
 type ExecuteQueryResponse struct {
-	Data    []interface{} `json:"data"`
-	Ok      bool          `json:"ok"`
-	Message string        `json:"message"`
+	Data    ExecuteQueryData `json:"data"`
+	Ok      bool             `json:"ok"`
+	Message string           `json:"message"`
 }
 
 func validateQueryArguments(args []ExecuteQueryArgument) error {

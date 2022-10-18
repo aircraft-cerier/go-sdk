@@ -40,11 +40,15 @@ type V2Endpoints struct {
 	ContainerRegistries     *ContainerRegistriesService
 	ResourceGroups          *ResourceGroupsService
 	AgentAccessTokens       *AgentAccessTokensService
+	AgentInfo               *AgentInfoService
+	Inventory               *InventoryService
+	ComplianceEvaluations   *ComplianceEvaluationService
 	Query                   *QueryService
 	Policy                  *PolicyService
 	Entities                *EntitiesService
 	Schemas                 *SchemasService
 	Datasources             *DatasourcesService
+	DataExportRules         *DataExportRulesService
 	TeamMembers             *TeamMembersService
 	VulnerabilityExceptions *VulnerabilityExceptionsService
 	Vulnerabilities         *v2VulnerabilitiesService
@@ -61,11 +65,15 @@ func NewV2Endpoints(c *Client) *V2Endpoints {
 		&ContainerRegistriesService{c},
 		&ResourceGroupsService{c},
 		&AgentAccessTokensService{c},
+		&AgentInfoService{c},
+		&InventoryService{c},
+		&ComplianceEvaluationService{c},
 		&QueryService{c},
 		NewV2PolicyService(c),
 		&EntitiesService{c},
 		&SchemasService{c, map[integrationSchema]V2Service{}},
 		&DatasourcesService{c},
+		&DataExportRulesService{c},
 		&TeamMembersService{c},
 		&VulnerabilityExceptionsService{c},
 		NewV2VulnerabilitiesService(c),
@@ -91,6 +99,14 @@ type V2Service interface {
 
 type V2CommonIntegration struct {
 	Data v2CommonIntegrationData `json:"data"`
+}
+
+// V2RawType is the interface that should be implemented when
+// a struct is a response that contains v2CommonIntegrationData.
+// This include AlertChannelRaw, CloudAccountRaw, ContainerRegistryRaw
+type V2RawType interface {
+	GetData() any
+	GetCommon() v2CommonIntegrationData
 }
 
 type V2Pagination struct {

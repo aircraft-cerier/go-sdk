@@ -1,7 +1,10 @@
 package gcp
 
 import (
+	"sort"
+
 	"github.com/hashicorp/hcl/v2/hclwrite"
+	"github.com/lacework/go-sdk/internal/unique"
 	"github.com/lacework/go-sdk/lwgenerate"
 	"github.com/pkg/errors"
 )
@@ -78,14 +81,10 @@ type GenerateGcpTfConfigurationArgs struct {
 	// Set of labels which will be added to the topic
 	PubSubTopicLabels map[string]string
 
+	CustomBucketName string
+
 	// Supply a GCP region for the new bucket. EU/US/ASIA
 	BucketRegion string
-
-	// Supply a GCP location for the new bucket. Defaults to global
-	BucketLocation string
-
-	// Supply a name for the new bucket
-	BucketName string
 
 	// Existing Bucket Name
 	ExistingLogBucketName string
@@ -103,15 +102,27 @@ type GenerateGcpTfConfigurationArgs struct {
 	// If left empty the TF will default to -1
 	LogBucketLifecycleRuleAge int
 
-	// The number of days to keep logs before deleting.
-	// If left as 0 the TF will default to 30.
-	LogBucketRetentionDays int
-
 	// If AuditLog is true, give the user the opportunity to name their integration. Defaults to "TF audit_log"
 	AuditLogIntegrationName string
 
 	// Lacework Profile to use
 	LaceworkProfile string
+
+	FoldersToInclude []string
+
+	FoldersToExclude []string
+
+	IncludeRootProjects bool
+
+	CustomFilter string
+
+	GoogleWorkspaceFilter bool
+
+	K8sFilter bool
+
+	Prefix string
+
+	WaitTime string
 }
 
 // Ensure all combinations of inputs are valid for supported spec
@@ -123,19 +134,19 @@ func (args *GenerateGcpTfConfigurationArgs) validate() error {
 
 	// Validate if this is an organization integration, verify that the organization id has been provided
 	if args.OrganizationIntegration && args.GcpOrganizationId == "" {
-		return errors.New("An Organization ID must be provided for an Organization Integration")
+		return errors.New("an Organization ID must be provided for an Organization Integration")
 	}
 
 	// Validate if an organization id has been provided that this is and organization integration
 	if !args.OrganizationIntegration && args.GcpOrganizationId != "" {
-		return errors.New("To provide an Organization ID, Organization Integration must be true")
+		return errors.New("to provide an Organization ID, Organization Integration must be true")
 	}
 
 	// Validate existing Service Account values, if set
 	if args.ExistingServiceAccount != nil {
 		if args.ExistingServiceAccount.Name == "" ||
 			args.ExistingServiceAccount.PrivateKey == "" {
-			return errors.New("When using an existing Service Account, existing name, and base64 encoded JSON Private Key fields all must be set")
+			return errors.New("when using an existing Service Account, existing name, and base64 encoded JSON Private Key fields all must be set")
 		}
 	}
 
@@ -156,7 +167,14 @@ type GcpTerraformModifier func(c *GenerateGcpTfConfigurationArgs)
 //     gcp.WithGcpServiceAccountCredentials("/path/to/sa/credentials.json")).Generate()
 //
 func NewTerraform(enableConfig bool, enableAuditLog bool, mods ...GcpTerraformModifier) *GenerateGcpTfConfigurationArgs {
-	config := &GenerateGcpTfConfigurationArgs{AuditLog: enableAuditLog, Configuration: enableConfig}
+	config := &GenerateGcpTfConfigurationArgs{
+		AuditLog:              enableAuditLog,
+		Configuration:         enableConfig,
+		IncludeRootProjects:   true,
+		EnableUBLA:            true,
+		GoogleWorkspaceFilter: true,
+		K8sFilter:             true,
+	}
 	// default LogBucketLifecycleRuleAge to -1. This helps us determine if the var has been set by the end user
 	config.LogBucketLifecycleRuleAge = -1
 	for _, m := range mods {
@@ -243,24 +261,16 @@ func WithPubSubTopicLabels(labels map[string]string) GcpTerraformModifier {
 	}
 }
 
+func WithCustomBucketName(name string) GcpTerraformModifier {
+	return func(c *GenerateGcpTfConfigurationArgs) {
+		c.CustomBucketName = name
+	}
+}
+
 // WithBucketRegion Set the Region in which the Bucket should be created
 func WithBucketRegion(region string) GcpTerraformModifier {
 	return func(c *GenerateGcpTfConfigurationArgs) {
 		c.BucketRegion = region
-	}
-}
-
-// WithBucketLocation Set the name of the bucket that will receive log objects
-func WithBucketLocation(location string) GcpTerraformModifier {
-	return func(c *GenerateGcpTfConfigurationArgs) {
-		c.BucketLocation = location
-	}
-}
-
-// WithBucketName Set the Location in which the Bucket should be created
-func WithBucketName(name string) GcpTerraformModifier {
-	return func(c *GenerateGcpTfConfigurationArgs) {
-		c.BucketName = name
 	}
 }
 
@@ -286,9 +296,9 @@ func WithEnableForceDestroyBucket() GcpTerraformModifier {
 }
 
 // WithEnableUBLA Enable force destroy of the bucket if it has stuff in it
-func WithEnableUBLA() GcpTerraformModifier {
+func WithEnableUBLA(enable bool) GcpTerraformModifier {
 	return func(c *GenerateGcpTfConfigurationArgs) {
-		c.EnableUBLA = true
+		c.EnableUBLA = enable
 	}
 }
 
@@ -300,17 +310,58 @@ func WithLogBucketLifecycleRuleAge(ruleAge int) GcpTerraformModifier {
 	}
 }
 
-// WithLogBucketRetentionDays Set the number of days to keep logs before deleting. Default is 30
-func WithLogBucketRetentionDays(days int) GcpTerraformModifier {
-	return func(c *GenerateGcpTfConfigurationArgs) {
-		c.LogBucketRetentionDays = days
-	}
-}
-
 // WithAuditLogIntegrationName Set the Config Integration name to be displayed on the Lacework UI
 func WithAuditLogIntegrationName(name string) GcpTerraformModifier {
 	return func(c *GenerateGcpTfConfigurationArgs) {
 		c.AuditLogIntegrationName = name
+	}
+}
+
+func WithFoldersToInclude(folders []string) GcpTerraformModifier {
+	return func(c *GenerateGcpTfConfigurationArgs) {
+		c.FoldersToInclude = folders
+	}
+}
+
+func WithFoldersToExclude(folders []string) GcpTerraformModifier {
+	return func(c *GenerateGcpTfConfigurationArgs) {
+		c.FoldersToExclude = folders
+	}
+}
+
+func WithIncludeRootProjects(include bool) GcpTerraformModifier {
+	return func(c *GenerateGcpTfConfigurationArgs) {
+		c.IncludeRootProjects = include
+	}
+}
+
+func WithCustomFilter(filter string) GcpTerraformModifier {
+	return func(c *GenerateGcpTfConfigurationArgs) {
+		c.CustomFilter = filter
+	}
+}
+
+func WithGoogleWorkspaceFilter(filter bool) GcpTerraformModifier {
+	return func(c *GenerateGcpTfConfigurationArgs) {
+		c.GoogleWorkspaceFilter = filter
+	}
+}
+
+func WithK8sFilter(filter bool) GcpTerraformModifier {
+	return func(c *GenerateGcpTfConfigurationArgs) {
+		c.K8sFilter = filter
+	}
+}
+
+func WithPrefix(prefix string) GcpTerraformModifier {
+	return func(c *GenerateGcpTfConfigurationArgs) {
+		c.Prefix = prefix
+	}
+}
+
+func WithWaitTime(waitTime string) GcpTerraformModifier {
+	return func(c *GenerateGcpTfConfigurationArgs) {
+		c.WaitTime = waitTime
 	}
 }
 
@@ -327,12 +378,12 @@ func (args *GenerateGcpTfConfigurationArgs) Generate() (string, error) {
 		return "", errors.Wrap(err, "failed to generate required providers")
 	}
 
-	gcpProvider, err := createGcpProvider(args)
+	gcpProvider, err := createGcpProvider(args.ServiceAccountCredentials, args.GcpProjectId)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to generate gcp provider")
 	}
 
-	laceworkProvider, err := createLaceworkProvider(args)
+	laceworkProvider, err := createLaceworkProvider(args.LaceworkProfile)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to generate lacework provider")
 	}
@@ -369,16 +420,25 @@ func createRequiredProviders() (*hclwrite.Block, error) {
 	)
 }
 
-func createGcpProvider(args *GenerateGcpTfConfigurationArgs) ([]*hclwrite.Block, error) {
-	blocks := []*hclwrite.Block{}
+func createLaceworkProvider(laceworkProfile string) (*hclwrite.Block, error) {
+	if laceworkProfile != "" {
+		return lwgenerate.NewProvider(
+			"lacework",
+			lwgenerate.HclProviderWithAttributes(map[string]interface{}{"profile": laceworkProfile}),
+		).ToBlock()
+	}
+	return nil, nil
+}
+
+func createGcpProvider(serviceAccountCredentials string, projectId string) ([]*hclwrite.Block, error) {
 	attrs := map[string]interface{}{}
 
-	if args.ServiceAccountCredentials != "" {
-		attrs["credentials"] = args.ServiceAccountCredentials
+	if serviceAccountCredentials != "" {
+		attrs["credentials"] = serviceAccountCredentials
 	}
 
-	if args.GcpProjectId != "" {
-		attrs["project"] = args.GcpProjectId
+	if projectId != "" {
+		attrs["project"] = projectId
 	}
 
 	provider, err := lwgenerate.NewProvider(
@@ -389,19 +449,9 @@ func createGcpProvider(args *GenerateGcpTfConfigurationArgs) ([]*hclwrite.Block,
 		return nil, err
 	}
 
-	blocks = append(blocks, provider)
+	blocks := []*hclwrite.Block{provider}
 
 	return blocks, nil
-}
-
-func createLaceworkProvider(args *GenerateGcpTfConfigurationArgs) (*hclwrite.Block, error) {
-	if args.LaceworkProfile != "" {
-		return lwgenerate.NewProvider(
-			"lacework",
-			lwgenerate.HclProviderWithAttributes(map[string]interface{}{"profile": args.LaceworkProfile}),
-		).ToBlock()
-	}
-	return nil, nil
 }
 
 func createConfiguration(args *GenerateGcpTfConfigurationArgs) ([]*hclwrite.Block, error) {
@@ -417,6 +467,23 @@ func createConfiguration(args *GenerateGcpTfConfigurationArgs) ([]*hclwrite.Bloc
 			configurationModuleName = "gcp_organization_level_config"
 			attributes["org_integration"] = args.OrganizationIntegration
 			attributes["organization_id"] = args.GcpOrganizationId
+
+			if len(args.FoldersToInclude) > 0 {
+				set := unique.StringSlice(args.FoldersToInclude)
+				sort.Strings(set)
+				attributes["folders_to_include"] = set
+			}
+
+			if len(args.FoldersToExclude) > 0 {
+				set := unique.StringSlice(args.FoldersToExclude)
+				sort.Strings(set)
+				attributes["folders_to_exclude"] = set
+
+				// Default true in gcp-audit-log TF module
+				if args.IncludeRootProjects != true {
+					attributes["include_root_projects"] = args.IncludeRootProjects
+				}
+			}
 		}
 
 		if args.ExistingServiceAccount != nil {
@@ -427,6 +494,14 @@ func createConfiguration(args *GenerateGcpTfConfigurationArgs) ([]*hclwrite.Bloc
 
 		if args.ConfigurationIntegrationName != "" {
 			attributes["lacework_integration_name"] = args.ConfigurationIntegrationName
+		}
+
+		if args.Prefix != "" {
+			attributes["prefix"] = args.Prefix
+		}
+
+		if args.WaitTime != "" {
+			attributes["wait_time"] = args.WaitTime
 		}
 
 		moduleDetails = append(moduleDetails,
@@ -470,10 +545,6 @@ func createAuditLog(args *GenerateGcpTfConfigurationArgs) (*hclwrite.Block, erro
 				attributes["lifecycle_rule_age"] = args.LogBucketLifecycleRuleAge
 			}
 
-			if args.BucketName != "" {
-				attributes["log_bucket"] = args.BucketName
-			}
-
 			if args.AuditLogLabels != nil {
 				attributes["labels"] = args.AuditLogLabels
 			}
@@ -486,20 +557,17 @@ func createAuditLog(args *GenerateGcpTfConfigurationArgs) (*hclwrite.Block, erro
 				attributes["bucket_force_destroy"] = true
 			}
 
-			if args.EnableUBLA {
-				attributes["enable_ubla"] = true
+			// Default true in gcp-audit-log TF module
+			if args.EnableUBLA != true {
+				attributes["enable_ubla"] = args.EnableUBLA
+			}
+
+			if args.CustomBucketName != "" {
+				attributes["custom_bucket_name"] = args.CustomBucketName
 			}
 
 			if args.BucketRegion != "" {
 				attributes["bucket_region"] = args.BucketRegion
-			}
-
-			if args.BucketLocation != "" {
-				attributes["log_bucket_location"] = args.BucketLocation
-			}
-
-			if args.LogBucketRetentionDays != 0 {
-				attributes["log_bucket_retention_days"] = args.LogBucketRetentionDays
 			}
 		}
 
@@ -517,6 +585,23 @@ func createAuditLog(args *GenerateGcpTfConfigurationArgs) (*hclwrite.Block, erro
 			auditLogModuleName = "gcp_organization_level_audit_log"
 			attributes["org_integration"] = args.OrganizationIntegration
 			attributes["organization_id"] = args.GcpOrganizationId
+
+			if len(args.FoldersToInclude) > 0 {
+				set := unique.StringSlice(args.FoldersToInclude)
+				sort.Strings(set)
+				attributes["folders_to_include"] = set
+			}
+
+			if len(args.FoldersToExclude) > 0 {
+				set := unique.StringSlice(args.FoldersToExclude)
+				sort.Strings(set)
+				attributes["folders_to_exclude"] = set
+
+				// Default true in gcp-audit-log TF module
+				if args.IncludeRootProjects != true {
+					attributes["include_root_projects"] = args.IncludeRootProjects
+				}
+			}
 		}
 
 		if args.ExistingServiceAccount == nil && args.Configuration {
@@ -537,6 +622,28 @@ func createAuditLog(args *GenerateGcpTfConfigurationArgs) (*hclwrite.Block, erro
 
 		if args.AuditLogIntegrationName != "" {
 			attributes["lacework_integration_name"] = args.AuditLogIntegrationName
+		}
+
+		if args.CustomFilter != "" {
+			attributes["custom_filter"] = args.CustomFilter
+		}
+
+		// Default true in gcp-audit-log TF module
+		if args.GoogleWorkspaceFilter != true {
+			attributes["google_workspace_filter"] = args.GoogleWorkspaceFilter
+		}
+
+		// Default true in gcp-audit-log TF module
+		if args.K8sFilter != true {
+			attributes["k8s_filter"] = args.K8sFilter
+		}
+
+		if args.Prefix != "" {
+			attributes["prefix"] = args.Prefix
+		}
+
+		if args.WaitTime != "" {
+			attributes["wait_time"] = args.WaitTime
 		}
 
 		moduleDetails = append(moduleDetails,

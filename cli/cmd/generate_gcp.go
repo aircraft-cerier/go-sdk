@@ -1,11 +1,6 @@
 package cmd
 
 import (
-	"encoding/base64"
-	"encoding/json"
-	"io/ioutil"
-	"os"
-	"path/filepath"
 	"regexp"
 	"time"
 
@@ -15,7 +10,6 @@ import (
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/pkg/errors"
 
-	"github.com/lacework/go-sdk/internal/file"
 	"github.com/lacework/go-sdk/lwgenerate/gcp"
 )
 
@@ -37,10 +31,8 @@ var (
 	QuestionGcpUseExistingBucket        = "Use an existing bucket?"
 	QuestionGcpExistingBucketName       = "Specify an existing bucket name:"
 	QuestionGcpConfigureNewBucket       = "Configure settings for new bucket?"
-	QuestionGcpBucketName               = "Specify new bucket name: (optional)"
 	QuestionGcpBucketRegion             = "Specify the bucket region: (optional)"
-	QuestionGcpBucketLocation           = "Specify the bucket location: (optional)"
-	QuestionGcpBucketRetention          = "Specify the bucket retention days: (optional)"
+	QuestionGcpCustomBucketName         = "Specify a custom bucket name: (optional)"
 	QuestionGcpBucketLifecycle          = "Specify the bucket lifecycle rule age: (optional)"
 	QuestionGcpEnableUBLA               = "Enable uniform bucket level access(UBLA)?"
 	QuestionGcpEnableBucketForceDestroy = "Enable bucket force destroy?"
@@ -54,6 +46,7 @@ var (
 	QuestionGcpAnotherAdvancedOpt      = "Configure another advanced integration option"
 	GcpAdvancedOptLocation             = "Customize output location"
 	QuestionGcpCustomizeOutputLocation = "Provide the location for the output to be written:"
+	QuestionGcpCustomFilter            = "Specify a custom Audit Log filter which supersedes all other filter options"
 	GcpAdvancedOptDone                 = "Done"
 
 	// GcpRegionRegex regex used for validating region input
@@ -64,6 +57,8 @@ var (
 	GenerateGcpCommandExtraState             = &GcpGenerateCommandExtraState{}
 	CachedGcpAssetIacParams                  = "iac-gcp-generate-params"
 	CachedAssetGcpExtraState                 = "iac-gcp-extra-state"
+
+	InvalidProjectIDMessage = "invalid GCP project ID.  It must be 6 to 30 lowercase ASCII letters, digits, or hyphens. It must start with a letter. Trailing hyphens are prohibited. Example: tokyo-rain-123"
 
 	// gcp command is used to generate TF code for gcp
 	generateGcpTfCommand = &cobra.Command{
@@ -106,15 +101,21 @@ See help output for more details on the parameter value(s) required for Terrafor
 				gcp.WithBucketLabels(GenerateGcpCommandState.BucketLabels),
 				gcp.WithPubSubSubscriptionLabels(GenerateGcpCommandState.PubSubSubscriptionLabels),
 				gcp.WithPubSubTopicLabels(GenerateGcpCommandState.PubSubTopicLabels),
+				gcp.WithCustomBucketName(GenerateGcpCommandState.CustomBucketName),
 				gcp.WithBucketRegion(GenerateGcpCommandState.BucketRegion),
-				gcp.WithBucketLocation(GenerateGcpCommandState.BucketLocation),
-				gcp.WithBucketName(GenerateGcpCommandState.BucketName),
 				gcp.WithExistingLogBucketName(GenerateGcpCommandState.ExistingLogBucketName),
 				gcp.WithExistingLogSinkName(GenerateGcpCommandState.ExistingLogSinkName),
 				gcp.WithAuditLogIntegrationName(GenerateGcpCommandState.AuditLogIntegrationName),
 				gcp.WithLaceworkProfile(GenerateGcpCommandState.LaceworkProfile),
-				gcp.WithLogBucketRetentionDays(GenerateGcpCommandState.LogBucketRetentionDays),
 				gcp.WithLogBucketLifecycleRuleAge(GenerateGcpCommandState.LogBucketLifecycleRuleAge),
+				gcp.WithFoldersToInclude(GenerateGcpCommandState.FoldersToInclude),
+				gcp.WithFoldersToExclude(GenerateGcpCommandState.FoldersToExclude),
+				gcp.WithCustomFilter(GenerateGcpCommandState.CustomFilter),
+				gcp.WithGoogleWorkspaceFilter(GenerateGcpCommandState.GoogleWorkspaceFilter),
+				gcp.WithK8sFilter(GenerateGcpCommandState.K8sFilter),
+				gcp.WithPrefix(GenerateGcpCommandState.Prefix),
+				gcp.WithWaitTime(GenerateGcpCommandState.WaitTime),
+				gcp.WithEnableUBLA(GenerateGcpCommandState.EnableUBLA),
 			}
 
 			if GenerateGcpCommandState.OrganizationIntegration {
@@ -125,8 +126,8 @@ See help output for more details on the parameter value(s) required for Terrafor
 				mods = append(mods, gcp.WithEnableForceDestroyBucket())
 			}
 
-			if GenerateGcpCommandState.EnableUBLA {
-				mods = append(mods, gcp.WithEnableUBLA())
+			if len(GenerateGcpCommandState.FoldersToExclude) > 0 {
+				mods = append(mods, gcp.WithIncludeRootProjects(GenerateGcpCommandState.IncludeRootProjects))
 			}
 
 			// Create new struct
@@ -144,7 +145,7 @@ See help output for more details on the parameter value(s) required for Terrafor
 			}
 
 			// Write-out generated code to location specified
-			dirname, location, err := writeGeneratedCodeToLocation(cmd, hcl, "gcp")
+			dirname, _, err := writeGeneratedCodeToLocation(cmd, hcl, "gcp")
 			if err != nil {
 				return err
 			}
@@ -159,8 +160,7 @@ See help output for more details on the parameter value(s) required for Terrafor
 				return errors.Wrap(err, "failed to prompt for terraform execution")
 			}
 
-			// Execute
-			locationDir := filepath.Dir(location)
+			locationDir, _ := determineOutputDirPath(dirname, "gcp")
 			if GenerateGcpCommandExtraState.TerraformApply {
 				// Execution pre-run check
 				err := executionPreRunChecks(dirname, locationDir, "gcp")
@@ -191,8 +191,11 @@ See help output for more details on the parameter value(s) required for Terrafor
 			if err != nil {
 				return errors.Wrap(err, "failed to load command flags")
 			}
-			if err := validateServiceAccountCredentialsFile(gcpSaCredentials); err != nil {
-				return err
+
+			if gcpSaCredentials != "" {
+				if err := gcp.ValidateServiceAccountCredentialsFile(gcpSaCredentials); err != nil {
+					return err
+				}
 			}
 
 			// Validate gcp region, if passed
@@ -262,6 +265,32 @@ See help output for more details on the parameter value(s) required for Terrafor
 	}
 )
 
+type GcpGenerateCommandExtraState struct {
+	AskAdvanced                bool
+	Output                     string
+	ConfigureNewBucketSettings bool
+	UseExistingServiceAccount  bool
+	UseExistingBucket          bool
+	UseExistingSink            bool
+	TerraformApply             bool
+}
+
+func (gcp *GcpGenerateCommandExtraState) isEmpty() bool {
+	return gcp.Output == "" &&
+		!gcp.AskAdvanced &&
+		!gcp.UseExistingServiceAccount &&
+		!gcp.UseExistingBucket &&
+		!gcp.UseExistingSink &&
+		!gcp.TerraformApply
+}
+
+// Flush current state of the struct to disk, provided it's not empty
+func (gcp *GcpGenerateCommandExtraState) writeCache() {
+	if !gcp.isEmpty() {
+		cli.WriteAssetToCache(CachedAssetGcpExtraState, time.Now().Add(time.Hour*1), gcp)
+	}
+}
+
 func initGenerateGcpTfCommandFlags() {
 	// add flags to sub commands
 	// TODO Share the help with the interactive generation
@@ -310,22 +339,17 @@ func initGenerateGcpTfCommandFlags() {
 		"configuration_integration_name",
 		"",
 		"specify a custom configuration integration name")
+	generateGcpTfCommand.PersistentFlags().StringVar(
+		&GenerateGcpCommandState.CustomBucketName,
+		"custom_bucket_name",
+		"",
+		"override prefix based storage bucket name generation with a custom name")
 	// TODO: Implement AuditLogLabels, BucketLabels, PubSubSubscriptionLabels & PubSubTopicLabels
 	generateGcpTfCommand.PersistentFlags().StringVar(
 		&GenerateGcpCommandState.BucketRegion,
 		"bucket_region",
 		"",
 		"specify bucket region")
-	generateGcpTfCommand.PersistentFlags().StringVar(
-		&GenerateGcpCommandState.BucketLocation,
-		"bucket_location",
-		"",
-		"specify bucket location")
-	generateGcpTfCommand.PersistentFlags().StringVar(
-		&GenerateGcpCommandState.BucketName,
-		"bucket_name",
-		"",
-		"specify new bucket name")
 	generateGcpTfCommand.PersistentFlags().StringVar(
 		&GenerateGcpCommandState.ExistingLogBucketName,
 		"existing_bucket_name",
@@ -344,23 +368,60 @@ func initGenerateGcpTfCommandFlags() {
 	generateGcpTfCommand.PersistentFlags().BoolVar(
 		&GenerateGcpCommandState.EnableUBLA,
 		"enable_ubla",
-		false,
+		true,
 		"enable universal bucket level access(ubla)")
 	generateGcpTfCommand.PersistentFlags().IntVar(
 		&GenerateGcpCommandState.LogBucketLifecycleRuleAge,
 		"bucket_lifecycle_rule_age",
 		-1,
 		"specify the lifecycle rule age")
-	generateGcpTfCommand.PersistentFlags().IntVar(
-		&GenerateGcpCommandState.LogBucketRetentionDays,
-		"bucket_retention_days",
-		0,
-		"specify the bucket retention days")
+	generateGcpTfCommand.PersistentFlags().StringVar(
+		&GenerateGcpCommandState.CustomFilter,
+		"custom_filter",
+		"",
+		"Audit Log filter which supersedes all other filter options when defined")
+	generateGcpTfCommand.PersistentFlags().BoolVar(
+		&GenerateGcpCommandState.GoogleWorkspaceFilter,
+		"google_workspace_filter",
+		true,
+		"filter out Google Workspace login logs from GCP Audit Log sinks")
+	generateGcpTfCommand.PersistentFlags().BoolVar(
+		&GenerateGcpCommandState.K8sFilter,
+		"k8s_filter",
+		true,
+		"filter out GKE logs from GCP Audit Log sinks")
+	generateGcpTfCommand.PersistentFlags().StringVar(
+		&GenerateGcpCommandState.Prefix,
+		"prefix",
+		"",
+		"prefix that will be used at the beginning of every generated resource")
+	generateGcpTfCommand.PersistentFlags().StringVar(
+		&GenerateGcpCommandState.WaitTime,
+		"wait_time",
+		"",
+		"amount of time to wait before the next resource is provisioned")
 	generateGcpTfCommand.PersistentFlags().StringVar(
 		&GenerateGcpCommandState.AuditLogIntegrationName,
 		"audit_log_integration_name",
 		"",
 		"specify a custom audit log integration name")
+	generateGcpTfCommand.PersistentFlags().StringArrayVarP(
+		&GenerateGcpCommandState.FoldersToExclude,
+		"folders_to_exclude",
+		"e",
+		[]string{},
+		"List of root folders to exclude for an organization-level integration")
+	generateGcpTfCommand.PersistentFlags().BoolVar(
+		&GenerateGcpCommandState.IncludeRootProjects,
+		"include_root_projects",
+		true,
+		"Disables logic that includes root-level projects if excluding folders")
+	generateGcpTfCommand.PersistentFlags().StringArrayVarP(
+		&GenerateGcpCommandState.FoldersToInclude,
+		"folders_to_include",
+		"i",
+		[]string{},
+		"list of root folders to include for an organization-level integration")
 	generateGcpTfCommand.PersistentFlags().BoolVar(
 		&GenerateGcpCommandExtraState.TerraformApply,
 		"apply",
@@ -371,78 +432,9 @@ func initGenerateGcpTfCommandFlags() {
 		&GenerateGcpCommandExtraState.Output,
 		"output",
 		"",
-		"location to write generated content",
+		"location to write generated content (default is ~/lacework/gcp)",
 	)
 
-}
-
-func validateServiceAccountCredentialsFile(credFile string) error {
-	if credFile == "" {
-		return nil
-	}
-
-	if file.FileExists(credFile) {
-		jsonFile, err := os.Open(credFile)
-		// if we os.Open returns an error then handle it
-		if err != nil {
-			return errors.Wrap(err, "issue opening GCP credentials file")
-		}
-		defer jsonFile.Close()
-
-		byteValue, err := ioutil.ReadAll(jsonFile)
-		if err != nil {
-			return errors.Wrap(err, "unable to parse credentials file")
-		}
-
-		var credFileContent map[string]interface{}
-		err = json.Unmarshal(byteValue, &credFileContent)
-		if err != nil {
-			return errors.Wrap(err, "unable to parse credentials file")
-		}
-		credFileContent, valid := validateSaCredFileContent(credFileContent)
-		if !valid {
-			return errors.New("invalid GCP Service Account credentials file. " +
-				"The private_key and client_email fields MUST be present.")
-		}
-	} else {
-		return errors.New("provided GCP credentials file does not exist")
-	}
-	return nil
-}
-
-func validateSaCredFileContent(credFileContent map[string]interface{}) (map[string]interface{}, bool) {
-	if credFileContent["private_key"] != nil && credFileContent["client_email"] != nil {
-		privateKey, ok := credFileContent["private_key"].(string)
-		if !ok {
-			return credFileContent, false
-		}
-		err := validateStringIsBase64(privateKey)
-		if err != nil {
-			// convert private key to base64 if it isn't already
-			// the private_key in a standard GCP SA credentials file isn't usually base64 encoded
-			privateKey := base64.StdEncoding.EncodeToString([]byte(privateKey))
-			credFileContent["private_key"] = privateKey
-			return credFileContent, true
-		}
-	}
-	return credFileContent, false
-}
-
-// create survey.Validator for string is base64
-func validateStringIsBase64(val interface{}) error {
-	switch value := val.(type) {
-	case string:
-		// if value isn't base64, return error
-		_, err := base64.StdEncoding.DecodeString(value)
-		if err != nil {
-			return errors.New("provided private key is not base64 encoded")
-		}
-	default:
-		// if the value passed is not a string
-		return errors.New("value must be a string")
-	}
-
-	return nil
 }
 
 // survey.Validator for gcp region
@@ -467,23 +459,6 @@ func validateGcpRegion(val interface{}) error {
 	}
 
 	return nil
-}
-
-// survey.Validator for gcp service account credentials
-func validateGcpServiceAccountCredentials(val interface{}) error {
-	switch value := val.(type) {
-	case string:
-		if value == "" {
-			// as this field is optional, it is valid for this field to be empty
-			return nil
-		} else {
-			// if value isn't a valid path, return an error
-			return validateServiceAccountCredentialsFile(value)
-		}
-	default:
-		// if the value passed is not a string
-		return errors.New("value must be a string")
-	}
 }
 
 func promptGcpAuditLogQuestions(config *gcp.GenerateGcpTfConfigurationArgs, extraState *GcpGenerateCommandExtraState) error {
@@ -515,25 +490,15 @@ func promptGcpAuditLogQuestions(config *gcp.GenerateGcpTfConfigurationArgs, extr
 			Response: &extraState.ConfigureNewBucketSettings,
 		},
 		{
-			Prompt:   &survey.Input{Message: QuestionGcpBucketName, Default: config.BucketName},
-			Checks:   []*bool{&config.AuditLog, &newBucket, &extraState.ConfigureNewBucketSettings},
-			Response: &config.BucketName,
-		},
-		{
 			Prompt:   &survey.Input{Message: QuestionGcpBucketRegion, Default: config.BucketRegion},
 			Checks:   []*bool{&config.AuditLog, &newBucket, &extraState.ConfigureNewBucketSettings},
 			Opts:     []survey.AskOpt{survey.WithValidator(validateGcpRegion)},
 			Response: &config.BucketRegion,
 		},
 		{
-			Prompt:   &survey.Input{Message: QuestionGcpBucketLocation, Default: config.BucketLocation},
+			Prompt:   &survey.Input{Message: QuestionGcpCustomBucketName, Default: config.CustomBucketName},
 			Checks:   []*bool{&config.AuditLog, &newBucket, &extraState.ConfigureNewBucketSettings},
-			Response: &config.BucketLocation,
-		},
-		{
-			Prompt:   &survey.Input{Message: QuestionGcpBucketRetention, Default: "0"},
-			Checks:   []*bool{&config.AuditLog, &newBucket, &extraState.ConfigureNewBucketSettings},
-			Response: &config.LogBucketRetentionDays,
+			Response: &config.CustomBucketName,
 		},
 		{
 			Prompt:   &survey.Input{Message: QuestionGcpBucketLifecycle, Default: "-1"},
@@ -564,6 +529,11 @@ func promptGcpAuditLogQuestions(config *gcp.GenerateGcpTfConfigurationArgs, extr
 			Required: true,
 			Response: &config.ExistingLogSinkName,
 		},
+		{
+			Prompt:   &survey.Input{Message: QuestionGcpCustomFilter, Default: config.CustomFilter},
+			Checks:   []*bool{&config.AuditLog},
+			Response: &config.CustomFilter,
+		},
 	}, config.AuditLog)
 
 	return err
@@ -584,7 +554,7 @@ func promptGcpExistingServiceAccountQuestions(config *gcp.GenerateGcpTfConfigura
 		{
 			Prompt:   &survey.Input{Message: QuestionExistingServiceAccountPrivateKey, Default: config.ExistingServiceAccount.PrivateKey},
 			Response: &config.ExistingServiceAccount.PrivateKey,
-			Opts:     []survey.AskOpt{survey.WithValidator(survey.Required), survey.WithValidator(validateStringIsBase64)},
+			Opts:     []survey.AskOpt{survey.WithValidator(survey.Required), survey.WithValidator(gcp.ValidateStringIsBase64)},
 		}})
 
 	return err
@@ -746,6 +716,7 @@ func promptGcpGenerate(
 			{
 				Prompt:   &survey.Input{Message: QuestionGcpProjectID, Default: config.GcpProjectId},
 				Checks:   []*bool{configurationOrAuditLogEnabled(config)},
+				Opts:     []survey.AskOpt{survey.WithValidator(validateGcpProjectId)},
 				Required: true,
 				Response: &config.GcpProjectId,
 			},
@@ -763,7 +734,7 @@ func promptGcpGenerate(
 			{
 				Prompt:   &survey.Input{Message: QuestionGcpServiceAccountCredsPath, Default: config.ServiceAccountCredentials},
 				Checks:   []*bool{configurationOrAuditLogEnabled(config)},
-				Opts:     []survey.AskOpt{survey.WithValidator(validateGcpServiceAccountCredentials)},
+				Opts:     []survey.AskOpt{survey.WithValidator(gcp.ValidateServiceAccountCredentials)},
 				Response: &config.ServiceAccountCredentials,
 			},
 		}); err != nil {
@@ -788,6 +759,25 @@ func promptGcpGenerate(
 		if err := askAdvancedOptions(config, extraState); err != nil {
 			return err
 		}
+	}
+
+	return nil
+}
+
+func validateGcpProjectId(val interface{}) error {
+	switch value := val.(type) {
+
+	case string:
+		match, err := regexp.MatchString("(^[a-z][a-z0-9-]{4,28}[a-z0-9]$|^$)", value)
+		if err != nil {
+			return err
+		}
+
+		if !match {
+			return errors.New(InvalidProjectIDMessage)
+		}
+	default:
+		return errors.New("value must be a string")
 	}
 
 	return nil

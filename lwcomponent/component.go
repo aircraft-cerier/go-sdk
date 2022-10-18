@@ -24,6 +24,7 @@ import (
 	_ "embed"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -59,14 +60,76 @@ type State struct {
 func LoadState(client *api.Client) (*State, error) {
 	if client != nil {
 		s := new(State)
+
+		// load remote components
 		err := client.RequestDecoder("GET", "v2/Components", nil, s)
 		if err != nil {
 			return s, err
 		}
 
+		// load local components
+		s.loadComponentsFromDisk()
+
+		// load dev components
+		s.loadDevComponents()
+
 		return s, s.WriteState()
 	}
 	return nil, errors.New("invalid api client")
+}
+
+// loadComponentsFromDisk will load all component from disk (local)
+func (s *State) loadComponentsFromDisk() {
+	if dir, err := Dir(); err == nil {
+		components, err := os.ReadDir(dir)
+		if err != nil {
+			return
+		}
+
+		// traverse components dir
+		for _, c := range components {
+			if !c.IsDir() {
+				continue
+			}
+
+			// load components that are not already registered
+			if _, found := s.GetComponent(c.Name()); !found {
+				component := Component{Name: c.Name()}
+
+				// verify that the directory is a component, that means that the
+				// directory contains either a '.dev' file or, both '.version'
+				// and '.signature' files
+				//
+				// TODO @afiune maybe we should deploy a .specs file?
+				err := component.isVerified()
+
+				if component.UnderDevelopment() || err == nil {
+					s.Components = append(s.Components, component)
+				}
+			}
+		}
+	}
+}
+
+// loadDevComponents will load all components that are under development
+func (s *State) loadDevComponents() {
+	for i := range s.Components {
+		if s.Components[i].UnderDevelopment() {
+			// existing component being developed
+			if err := s.Components[i].loadDevSpecs(); err != nil {
+				s.Components[i].Description = err.Error()
+			}
+		}
+	}
+
+	if devComponent := os.Getenv("LW_CDK_DEV_COMPONENT"); devComponent != "" {
+		// component is not yet defined, add it to the state
+		dev := Component{Name: devComponent}
+		if err := dev.loadDevSpecs(); err != nil {
+			dev.Description = err.Error()
+		}
+		s.Components = append(s.Components, dev)
+	}
 }
 
 // LocalState loads the state from the local storage ("Dir()/state")
@@ -150,6 +213,14 @@ func (s State) Install(name string) error {
 		return err
 	}
 
+	// verify development mode
+	if component.UnderDevelopment() {
+		p, _ := component.Path() // @afiune we don't care if the component exists or not
+		msg := "components under development can't be installed.\n\n" +
+			"Deploy the component manually at '" + p + "'"
+		return errors.New(msg)
+	}
+
 	// @afiune verify if component is in latest
 
 	// @afiune install
@@ -206,20 +277,61 @@ var (
 type Artifact struct {
 	OS        string `json:"os"`
 	ARCH      string `json:"arch"`
-	URL       string `json:"url"`
+	URL       string `json:"url,omitempty"`
 	Signature string `json:"signature"`
 	//Size ?
+}
+
+// Components should leave a trail/crumb after installation or update,
+// these messages will be shown by the Lacework CLI
+type Breadcrumbs struct {
+	InstallationMessage string `json:"installationMessage,omitempty"`
+	UpdateMessage       string `json:"updateMessage,omitempty"`
 }
 
 type Component struct {
 	Name          string         `json:"name"`
 	Description   string         `json:"description"`
 	Type          Type           `json:"type"`
-	LatestVersion semver.Version `json:"version"`
+	LatestVersion semver.Version `json:"-"`
 	Artifacts     []Artifact     `json:"artifacts"`
+	Breadcrumbs   Breadcrumbs    `json:"breadcrumbs,omitempty"`
 
 	// @dhazekamp command_name required when CLICommand is true?
-	CommandName string `json:"command_name"`
+	CommandName string `json:"command_name,omitempty"`
+}
+
+func (c *Component) UnmarshalJSON(data []byte) error {
+	type ComponentAlias Component
+	type T struct {
+		*ComponentAlias     `json:",inline"`
+		LatestVersionString string `json:"version"`
+	}
+
+	temp := &T{ComponentAlias: (*ComponentAlias)(c)}
+	err := json.Unmarshal(data, temp)
+	if err != nil {
+		return err
+	}
+
+	latestVersion, err := semver.NewVersion(temp.LatestVersionString)
+	if err != nil {
+		return err
+	}
+	c.LatestVersion = *latestVersion
+
+	return nil
+}
+
+func (c Component) MarshalJSON() ([]byte, error) {
+	type ComponentAlias Component
+	type T struct {
+		ComponentAlias      `json:",inline"`
+		LatestVersionString string `json:"version"`
+	}
+
+	obj := &T{ComponentAlias: (ComponentAlias)(c), LatestVersionString: c.LatestVersion.String()}
+	return json.Marshal(obj)
 }
 
 // RootPath returns the component's root path ("Dir()/{name}")
@@ -254,6 +366,12 @@ func (c Component) Path() (string, error) {
 
 // CurrentVersion returns the current installed version of the component
 func (c Component) CurrentVersion() (*semver.Version, error) {
+	// development mode, avoid loading the current version,
+	// return latest which is what's inside the '.dev' specs
+	if c.UnderDevelopment() {
+		return &c.LatestVersion, nil
+	}
+
 	dir, err := c.RootPath()
 	if err != nil {
 		return nil, err
@@ -373,7 +491,54 @@ func (c Component) ArtifactForRunningHost() (*Artifact, bool) {
 	return nil, false
 }
 
+// loadDevSpecs will lookup for the '.dev' specs file under the
+// component root path to load it into the component itself
+func (c *Component) loadDevSpecs() error {
+	dir, err := c.RootPath()
+	if err != nil {
+		return errors.New("unable to detect RootPath")
+	}
+
+	devSpecs := filepath.Join(dir, ".dev")
+	if file.FileExists(devSpecs) {
+		devSpecsBytes, err := ioutil.ReadFile(devSpecs)
+		if err != nil {
+			return errors.Errorf("unable to read %s file", devSpecs)
+		}
+		err = json.Unmarshal(devSpecsBytes, c)
+		if err != nil {
+			return errors.Errorf("unable to unmarshal %s file", devSpecs)
+		}
+	} else {
+		return errors.Errorf("create dev specs file '%s'", devSpecs)
+	}
+
+	return nil
+}
+
+// UnderDevelopment returns true if the component is under development
+// that is, if the component root path has the '.dev' specs file or, if
+// the environment variable 'LW_CDK_DEV_COMPONENT' matches the component name
+func (c Component) UnderDevelopment() bool {
+	if os.Getenv("LW_CDK_DEV_COMPONENT") == c.Name {
+		return true
+	}
+
+	dir, err := c.RootPath()
+	if err != nil {
+		return false
+	}
+
+	return file.FileExists(filepath.Join(dir, ".dev"))
+}
+
+// isVerified checks if the component has a valid signature
 func (c Component) isVerified() error {
+	// development mode, avoid verifying
+	if c.UnderDevelopment() {
+		return nil
+	}
+
 	// get component signature
 	sig, err := c.SignatureFromDisk()
 	if err != nil {
@@ -400,4 +565,41 @@ func (c Component) isVerified() error {
 
 	// validate the signature
 	return verifySignature(rootPublicKey, f, sig)
+}
+
+func (c Component) EnterDevelopmentMode() error {
+	if c.UnderDevelopment() {
+		return errors.New("component already under development.")
+	}
+
+	dir, err := c.RootPath()
+	if err != nil {
+		return errors.New("unable to detect RootPath")
+	}
+
+	devSpecs := filepath.Join(dir, ".dev")
+	if !file.FileExists(devSpecs) {
+		// remove prod artifacts
+		c.Artifacts = make([]Artifact, 0)
+
+		// configure dev version
+		cv, _ := semver.NewVersion("0.0.0-dev")
+		c.LatestVersion = *cv
+
+		// update description
+		c.Description = fmt.Sprintf("(dev-mode) %s", c.Description)
+
+		buf := new(bytes.Buffer)
+		if err := json.NewEncoder(buf).Encode(c); err != nil {
+			return err
+		}
+
+		if err := os.MkdirAll(dir, os.ModePerm); err != nil {
+			return err
+		}
+
+		return ioutil.WriteFile(devSpecs, buf.Bytes(), 0644)
+	}
+
+	return nil
 }

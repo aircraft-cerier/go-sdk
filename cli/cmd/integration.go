@@ -38,17 +38,20 @@ var (
 
 	// integrationCmd represents the integration command
 	integrationCmd = &cobra.Command{
-		Use:     "integration",
-		Aliases: []string{"integrations", "int"},
-		Short:   "Manage external integrations",
-		Long:    `Manage external integrations with the Lacework platform`,
+		Use:        "integration",
+		Aliases:    []string{"integrations", "int"},
+		Deprecated: "This command is deprecated. Use 'cloud-accounts', 'container-registries' or 'alert-channels'",
+		Hidden:     true,
+		Short:      "Manage external integrations",
+		Long:       `Manage external integrations with the Lacework platform`,
 	}
 
 	// integrationListCmd represents the list sub-command inside the integration command
 	integrationListCmd = &cobra.Command{
-		Use:   "list",
-		Short: "List all available external integrations",
-		Args:  cobra.NoArgs,
+		Use:        "list",
+		Deprecated: "This command is deprecated. Use 'cloud-accounts', 'container-registries' or 'alert-channels'",
+		Short:      "List all available external integrations",
+		Args:       cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			var (
 				integrations api.RawIntegrationsResponse
@@ -138,10 +141,11 @@ var (
 
 	// integrationCreateCmd represents the create sub-command inside the integration command
 	integrationCreateCmd = &cobra.Command{
-		Use:   "create",
-		Short: "Create an external integration",
-		Args:  cobra.NoArgs,
-		Long:  `Creates an external integration in your account through an interactive session.`,
+		Use:        "create",
+		Deprecated: "This command is deprecated. Use 'cloud-accounts', 'container-registries' or 'alert-channels'",
+		Short:      "Create an external integration",
+		Args:       cobra.NoArgs,
+		Long:       `Creates an external integration in your account through an interactive session.`,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if !cli.InteractiveMode() {
 				return errors.New("interactive mode is disabled")
@@ -159,10 +163,11 @@ var (
 
 	// integrationUpdateCmd represents the update sub-command inside the integration command
 	integrationUpdateCmd = &cobra.Command{
-		Use:    "update",
-		Hidden: true,
-		Short:  "Update an external integration",
-		Args:   cobra.NoArgs,
+		Use:        "update",
+		Deprecated: "This command is deprecated. Use 'cloud-accounts', 'container-registries' or 'alert-channels'",
+		Hidden:     true,
+		Short:      "Update an external integration",
+		Args:       cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			return nil
 		},
@@ -170,8 +175,9 @@ var (
 
 	// integrationDeleteCmd represents the delete sub-command inside the integration command
 	integrationDeleteCmd = &cobra.Command{
-		Use:   "delete <int_guid>",
-		Short: "Delete an external integration",
+		Use:        "delete <int_guid>",
+		Deprecated: "This command is deprecated. Use 'cloud-accounts', 'container-registries' or 'alert-channels'",
+		Short:      "Delete an external integration",
 		Long: `Delete an external integration by providing an integration GUID.
 
 Integration GUIDs can be found by using the 'lacework integration list' command.`,
@@ -241,6 +247,7 @@ func promptCreateIntegration() error {
 				"Google Container Registry (GCR)",
 				"Google Artifact Registry (GAR)",
 				"Github Container Registry (GHCR)",
+				"Inline Scanner Container Registry",
 				"AWS Config",
 				"AWS CloudTrail",
 				"AWS Config (US GovCloud)",
@@ -301,6 +308,8 @@ func promptCreateIntegration() error {
 		return createAwsEcrIntegration()
 	case "Google Artifact Registry (GAR)":
 		return createGarIntegration()
+	case "Inline Scanner Container Registry":
+		return createInlineScannerIntegration()
 	case "Github Container Registry (GHCR)":
 		return createGhcrIntegration()
 	case "Google Container Registry (GCR)":
@@ -779,6 +788,22 @@ func reflectIntegrationData(raw api.RawIntegration) [][]string {
 		}
 
 		switch iData.RegistryType {
+		case api.InlineScannerContainerRegistry.String():
+			inlineScanner, err := cli.LwApi.V2.ContainerRegistries.GetInlineScanner(raw.IntgGuid)
+			if err != nil {
+				cli.Log.Debugw("unable to decode integration data",
+					"integration_type", raw.Type,
+					"registry_type", iData.RegistryType,
+					"raw_data", raw.Data,
+					"error", err,
+				)
+				break
+			}
+			out = [][]string{
+				{"SERVER TOKEN", inlineScanner.Data.ServerToken.Token},
+				{"IDENTIFIER TAGS", castMapStringSliceToString(inlineScanner.Data.Data.IdentifierTag)},
+				{"LIMIT NUM SCANS", fmt.Sprintf("%d", inlineScanner.Data.Data.LimitNumScan)},
+			}
 		case api.DockerHubRegistry.String():
 			out = append(out, []string{"USERNAME", iData.Credentials.Username})
 			out = append(out, []string{"PASSWORD", iData.Credentials.Password})
