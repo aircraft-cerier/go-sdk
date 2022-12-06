@@ -21,11 +21,13 @@ package cmd
 import (
 	"context"
 	"os"
+	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/gammazero/workerpool"
 	"github.com/lacework/go-sdk/lwrunner"
 )
 
@@ -112,7 +114,7 @@ func awsRegionDescribeInstances(region string) ([]*lwrunner.AWSRunner, error) {
 
 	// Filter for instances where a tag key exists
 	if tagKey != "" {
-		cli.Log.Debugw("found tagKey", "tagKey", tagKey)
+		cli.Log.Debugw("looking for tagKey", "tagKey", tagKey, "region", region)
 		filters = append(filters, types.Filter{
 			Name: aws.String("tag-key"),
 			Values: []string{
@@ -123,7 +125,7 @@ func awsRegionDescribeInstances(region string) ([]*lwrunner.AWSRunner, error) {
 
 	// Filter for instances where certain tags exist
 	if len(tag) > 0 {
-		cli.Log.Debugw("found tags", "tag length", len(tag), "tags", tag)
+		cli.Log.Debugw("looking for tags", "tag length", len(tag), "tags", tag, "region", region)
 		filters = append(filters, types.Filter{
 			Name:   aws.String("tag:" + tag[0]),
 			Values: tag[1:],
@@ -135,10 +137,29 @@ func awsRegionDescribeInstances(region string) ([]*lwrunner.AWSRunner, error) {
 	}
 	result, err := svc.DescribeInstances(context.Background(), input)
 	if err != nil {
+		cli.Log.Debugw("error with describing instances", "input", input)
 		return nil, err
 	}
 
 	runners := []*lwrunner.AWSRunner{}
+	producerWg := new(sync.WaitGroup)
+	wp := workerpool.New(agentCmdState.InstallMaxParallelism)
+	runnerCh := make(chan *lwrunner.AWSRunner)
+
+	// We have multiple producers of runners and a single consumer.
+	// This goroutine acts as the consumer and reads from a channel into
+	// a slice. Pass a pointer to this slice and wait for this goroutine
+	// to finish before returning the memory pointed to.
+	consumerWg := new(sync.WaitGroup)
+	consumerWg.Add(1)
+	go func(runners *[]*lwrunner.AWSRunner) {
+		for runner := range runnerCh {
+			*runners = append(*runners, runner)
+		}
+		consumerWg.Done()
+	}(&runners)
+
+	cli.Log.Debugw("iterating over runners", "region", region)
 	for _, reservation := range result.Reservations {
 		for _, instance := range reservation.Instances {
 			if instance.PublicIpAddress != nil && instance.State.Name == "running" {
@@ -147,23 +168,54 @@ func awsRegionDescribeInstances(region string) ([]*lwrunner.AWSRunner, error) {
 					"instance state name", instance.State.Name,
 				)
 
-				runner, err := lwrunner.NewAWSRunner(
-					*instance.ImageId,
-					*instance.PublicIpAddress,
-					region,
-					*instance.Placement.AvailabilityZone,
-					*instance.InstanceId,
-					verifyHostCallback,
-				)
 				if err != nil {
-					cli.Log.Debugw("error identifying runner", "error", err, "instance ID", *instance.InstanceId)
+					cli.Log.Debugw("error identifying runner", "error", err, "instance_id", *instance.InstanceId)
 					continue
 				}
 
-				runners = append(runners, runner)
+				producerWg.Add(1)
+
+				// In order to use `wp.Submit()`, the input func() must not take any arguments.
+				// Copy the runner info to dedicated variable in the goroutine
+				instanceCopyWg := new(sync.WaitGroup)
+				instanceCopyWg.Add(1)
+
+				wp.Submit(func() {
+					defer producerWg.Done()
+
+					threadInstance := instance
+					instanceCopyWg.Done()
+					cli.Log.Debugw("found runner",
+						"public ip address", *threadInstance.PublicIpAddress,
+						"instance state name", threadInstance.State.Name,
+					)
+
+					runner, err := lwrunner.NewAWSRunner(
+						*threadInstance.ImageId,
+						agentCmdState.InstallSshUser,
+						*threadInstance.PublicIpAddress,
+						region,
+						*threadInstance.Placement.AvailabilityZone,
+						*threadInstance.InstanceId,
+						verifyHostCallback,
+					)
+					if err != nil {
+						cli.Log.Debugw("error identifying runner", "error", err, "instance_id", *threadInstance.InstanceId)
+					} else {
+						runnerCh <- runner
+					}
+				})
+				instanceCopyWg.Wait()
 			}
 		}
 	}
+
+	// Wait for the producers to finish, then close the producer thread pool,
+	// then close the channel they're writing to, then wait for the consumer to finish
+	producerWg.Wait()
+	wp.StopWait()
+	close(runnerCh)
+	consumerWg.Wait()
 
 	return runners, nil
 }

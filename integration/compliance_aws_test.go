@@ -39,7 +39,7 @@ func TestComplianceAwsList(t *testing.T) {
 func TestComplianceAwsGetReportFilter(t *testing.T) {
 	account := os.Getenv("LW_INT_TEST_AWS_ACC")
 	detailsOutput := "recommendations showing"
-	out, err, exitcode := LaceworkCLIWithTOMLConfig("compliance", "aws", "get-report", account, "--status", "compliant")
+	out, err, exitcode := LaceworkCLIWithTOMLConfig("compliance", "aws", "get-report", account, "--status", "compliant", "--type", "AWS_CIS_S3")
 
 	assert.Contains(t, out.String(), detailsOutput, "Filtered detail output should contain filtered result")
 	assert.Empty(t, err.String(), "STDERR should be empty")
@@ -117,10 +117,7 @@ func TestComplianceAwsGetReportAccountIDWithAlias(t *testing.T) {
 		"Getting compliance report...",
 		"STDOUT changed, please check")
 	assert.Contains(t, err.String(),
-		"unable to get aws compliance report",
-		"STDERR changed, please check")
-	assert.Contains(t, err.String(),
-		"AWS_ACCOUNT_ID=account-id&",
+		"no data found in the report",
 		"STDERR changed, please check")
 }
 
@@ -129,7 +126,7 @@ func TestComplianceAwsGetReportTypeAWS_SOC_Rev2(t *testing.T) {
 	out, err, exitcode := LaceworkCLIWithTOMLConfig("compliance", "aws", "get-report", account, "--type", "AWS_SOC_Rev2")
 	assert.Empty(t, err.String(), "STDERR should be empty")
 	assert.Equal(t, 0, exitcode, "EXITCODE is not the expected one")
-	assert.Contains(t, out.String(), "AWS_SOC_Rev2",
+	assert.Contains(t, out.String(), "AWS SOC 2 Report Rev2",
 		"STDOUT report type missing or something else is going on, please check")
 	assert.Contains(t, out.String(), "Report Type",
 		"STDOUT table headers changed, please check")

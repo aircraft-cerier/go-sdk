@@ -22,6 +22,7 @@ import (
 	"fmt"
 
 	"github.com/lacework/go-sdk/api"
+	"github.com/lacework/go-sdk/lwseverity"
 	"github.com/pkg/errors"
 )
 
@@ -34,6 +35,22 @@ type vulnerabilityPolicyError struct {
 	ExitCode              int
 	Message               string
 	Err                   error
+}
+
+func NewVulnerabilityPolicyErrorV2(
+	assessment api.VulnerabilitiesContainersResponse,
+	failOnSeverity string, failOnFixable bool,
+) *vulnerabilityPolicyError {
+	return &vulnerabilityPolicyError{
+		SeverityRating:        assessment.HighestSeverity(),
+		FixableSeverityRating: assessment.HighestFixableSeverity(),
+		FixableVulnCount:      assessment.TotalFixableVulnerabilities(),
+		FailOnSeverity:        failOnSeverity,
+		FailOnFixable:         failOnFixable,
+		// we use a default exit code that might change
+		// during NonCompliant() or Compliant()
+		ExitCode: 9,
+	}
 }
 
 func NewVulnerabilityPolicyError(
@@ -78,9 +95,9 @@ func (e *vulnerabilityPolicyError) Compliant() bool {
 // that is, when the provided assessment doesn't meet the
 // thresholds. It returns false if the policy is NOT compliant
 func (e *vulnerabilityPolicyError) validate() bool {
-	severityRating, _ := severityToProperTypes(e.SeverityRating)
-	fixableSeverityRating, _ := severityToProperTypes(e.FixableSeverityRating)
-	threshold, _ := severityToProperTypes(e.FailOnSeverity)
+	severityRating, _ := lwseverity.Normalize(e.SeverityRating)
+	fixableSeverityRating, _ := lwseverity.Normalize(e.FixableSeverityRating)
+	threshold, _ := lwseverity.Normalize(e.FailOnSeverity)
 
 	cli.Log.Debugw("validating policy",
 		"severity_rating", severityRating,

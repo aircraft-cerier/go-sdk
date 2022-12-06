@@ -46,6 +46,8 @@ For a complete list of supported operating systems, visit:
 ### SEE ALSO
 
 * [lacework](lacework.md)	 - A tool to manage the Lacework cloud security platform.
+* [lacework agent aws-install](lacework_agent_aws-install.md)	 - Install the datacollector agent on all remote AWS hosts
+* [lacework agent gcp-install](lacework_agent_gcp-install.md)	 - Install the datacollector agent on all remote GCE hosts
 * [lacework agent install](lacework_agent_install.md)	 - Install the datacollector agent on a remote host
 * [lacework agent list](lacework_agent_list.md)	 - List all hosts with a running agent
 * [lacework agent token](lacework_agent_token.md)	 - Manage agent access tokens

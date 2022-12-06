@@ -1,6 +1,6 @@
 .DS_Store
 .idea
-
+*.iml
 # vim
 *.swp
 
@@ -10,7 +10,9 @@ coverage.html
 circleci-artifacts/
 
 # for building binary files
-bin/
+/bin/
+# cli binary if built there
+cli/cli
 
 # vscode debug.test
 **/debug.test

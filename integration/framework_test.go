@@ -20,6 +20,7 @@ package integration
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -32,6 +33,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hashicorp/go-version"
+	"github.com/hashicorp/hc-install/product"
+	"github.com/hashicorp/hc-install/releases"
+	"github.com/hashicorp/terraform-exec/tfexec"
+	tfjson "github.com/hashicorp/terraform-json"
+
 	"github.com/Netflix/go-expect"
 	"github.com/hinshun/vt10x"
 	"github.com/lacework/go-sdk/api"
@@ -40,7 +47,15 @@ import (
 )
 
 // When emulating a terminal, the timeout to wait for output
-var expectStringTimeout = time.Second * 3
+const (
+	expectStringTimeout = time.Second * 3
+)
+
+var (
+	tfPath   string
+	tf       *tfexec.Terraform
+	execPath string
+)
 
 // Use this function to execute a real lacework CLI command, under the hood the function
 // will detect the correct binary depending on the running OS and architecture, if you
@@ -49,20 +64,19 @@ var expectStringTimeout = time.Second * 3
 //
 // example:
 //
-//  func TestHelpCommand(t *testing.T) {
-//    out, err, exitcode := LaceworkCLI("help")
+//	func TestHelpCommand(t *testing.T) {
+//	  out, err, exitcode := LaceworkCLI("help")
 //
-//    assert.Contains(t,
-//      out.String(),
-//      "Use \"lacework [command] --help\" for more information about a command.",
-//      "STDOUT doesn't match")
-//    assert.Empty(t,
-//      err.String(),
-//      "STDERR should be empty")
-//    assert.Equal(t, 0, exitcode,
-//      "EXITCODE is not the expected one")
-//  }
-//
+//	  assert.Contains(t,
+//	    out.String(),
+//	    "Use \"lacework [command] --help\" for more information about a command.",
+//	    "STDOUT doesn't match")
+//	  assert.Empty(t,
+//	    err.String(),
+//	    "STDERR should be empty")
+//	  assert.Equal(t, 0, exitcode,
+//	    "EXITCODE is not the expected one")
+//	}
 func LaceworkCLI(args ...string) (bytes.Buffer, bytes.Buffer, int) {
 	dir, err := ioutil.TempDir("", "lacework-cli")
 	if err != nil {
@@ -113,12 +127,12 @@ func NewLaceworkCLI(workingDir string, stdin io.Reader, args ...string) *exec.Cm
 //
 // Example:
 //
-// func TestUpdaterExample(t *testing.T) {
-//   enableTestingUpdaterEnv()
-//   defer disableTestingUpdaterEnv()
+//	func TestUpdaterExample(t *testing.T) {
+//	  enableTestingUpdaterEnv()
+//	  defer disableTestingUpdaterEnv()
 //
-//   // exacute an updater test
-// }
+//	  // exacute an updater test
+//	}
 var ciTestingUpdaterEnv = "CI_TEST_LWUPDATER"
 
 func enableTestingUpdaterEnv() {
@@ -412,4 +426,52 @@ func expectsCliOutput(t *testing.T, c *expect.Console, m []MsgRspHandler) {
 	for _, elm := range m {
 		elm.handle(t, c)
 	}
+}
+
+func TestMain(m *testing.M) {
+	tfPath = createDummyTOMLConfig()
+
+	terraformInstall()
+
+	ret := m.Run()
+
+	err := os.RemoveAll(tfPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	os.Exit(ret)
+}
+
+func terraformInstall() {
+	installer := &releases.ExactVersion{
+		Product: product.Terraform,
+		Version: version.Must(version.NewVersion("1.3.4")),
+	}
+
+	_execPath, err := installer.Install(context.Background())
+	if err != nil {
+		log.Fatalf("error installing Terraform: %s", err)
+	}
+	execPath = _execPath
+}
+
+func terraformValidate(dir string) *tfjson.ValidateOutput {
+	_tf, err := tfexec.NewTerraform(dir, execPath)
+	if err != nil {
+		log.Fatalf("error running NewTerraform: %s", err)
+	}
+	tf = _tf
+
+	err = tf.Init(context.Background())
+	if err != nil {
+		log.Fatalf("error running Init: %s", err)
+	}
+
+	validateOutput, err := tf.Validate(context.Background())
+	if err != nil {
+		log.Fatalf("error running Validate: %s", err)
+	}
+
+	return validateOutput
 }

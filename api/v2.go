@@ -19,6 +19,7 @@
 package api
 
 import (
+	"fmt"
 	"net/url"
 
 	"github.com/pkg/errors"
@@ -38,13 +39,17 @@ type V2Endpoints struct {
 	ReportRules             *ReportRulesService
 	CloudAccounts           *CloudAccountsService
 	ContainerRegistries     *ContainerRegistriesService
+	Configs                 *v2ConfigService
 	ResourceGroups          *ResourceGroupsService
 	AgentAccessTokens       *AgentAccessTokensService
 	AgentInfo               *AgentInfoService
 	Inventory               *InventoryService
 	ComplianceEvaluations   *ComplianceEvaluationService
 	Query                   *QueryService
+	OrganizationInfo        *OrganizationInfoService
 	Policy                  *PolicyService
+	Reports                 *ReportsService
+	ReportDefinitions       *ReportDefinitionsService
 	Entities                *EntitiesService
 	Schemas                 *SchemasService
 	Datasources             *DatasourcesService
@@ -52,6 +57,7 @@ type V2Endpoints struct {
 	TeamMembers             *TeamMembersService
 	VulnerabilityExceptions *VulnerabilityExceptionsService
 	Vulnerabilities         *v2VulnerabilitiesService
+	Alerts                  *AlertsService
 }
 
 func NewV2Endpoints(c *Client) *V2Endpoints {
@@ -63,13 +69,17 @@ func NewV2Endpoints(c *Client) *V2Endpoints {
 		&ReportRulesService{c},
 		&CloudAccountsService{c},
 		&ContainerRegistriesService{c},
+		NewV2ConfigService(c),
 		&ResourceGroupsService{c},
 		&AgentAccessTokensService{c},
 		&AgentInfoService{c},
 		&InventoryService{c},
 		&ComplianceEvaluationService{c},
 		&QueryService{c},
+		&OrganizationInfoService{c},
 		NewV2PolicyService(c),
+		NewReportsService(c),
+		&ReportDefinitionsService{c},
 		&EntitiesService{c},
 		&SchemasService{c, map[integrationSchema]V2Service{}},
 		&DatasourcesService{c},
@@ -77,6 +87,7 @@ func NewV2Endpoints(c *Client) *V2Endpoints {
 		&TeamMembersService{c},
 		&VulnerabilityExceptionsService{c},
 		NewV2VulnerabilitiesService(c),
+		&AlertsService{c},
 	}
 
 	v2.Schemas.Services = map[integrationSchema]V2Service{
@@ -177,9 +188,14 @@ func (c *Client) NextPage(p Pageable) (bool, error) {
 	if err != nil {
 		return false, errors.Wrap(err, "unable to part next page url")
 	}
+	// some NextPage values have query parameters which should be concatenated
+	path := pageURL.Path
+	if len(pageURL.Query()) > 0 {
+		path += fmt.Sprintf("?%s", pageURL.Query().Encode())
+	}
 
 	p.ResetPaging()
 	c.log.Info("pagination reset")
-	err = c.RequestDecoder("GET", pageURL.Path, nil, p)
+	err = c.RequestDecoder("GET", path, nil, p)
 	return true, err
 }

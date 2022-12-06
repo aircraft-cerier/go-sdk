@@ -2,12 +2,14 @@ package lwgenerate
 
 const (
 	LaceworkProviderSource  = "lacework/lacework"
-	LaceworkProviderVersion = "~> 0.26"
+	LaceworkProviderVersion = "~> 1.0"
 
 	AwsConfigSource      = "lacework/config/aws"
 	AwsConfigVersion     = "~> 0.5"
 	AwsCloudTrailSource  = "lacework/cloudtrail/aws"
 	AwsCloudTrailVersion = "~> 2.0"
+	AwsEksAuditSource    = "lacework/eks-audit-log/aws"
+	AwsEksAuditVersion   = "~> 0.4"
 
 	LWAzureConfigSource       = "lacework/config/azure"
 	LWAzureConfigVersion      = "~> 1.0"

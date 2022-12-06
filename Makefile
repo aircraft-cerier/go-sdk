@@ -3,11 +3,13 @@ default: ci
 ci: lint test fmt-check imports-check integration
 
 # Tooling versions
-GOLANGCILINTVERSION?=1.45.2
-GOIMPORTSVERSION?=v0.1.8
+GOLANGCILINTVERSION?=1.50.0
+GOIMPORTSVERSION?=v0.1.12
 GOXVERSION?=v1.0.1
-GOTESTSUMVERSION?=v1.7.0
-GOJUNITVERSION?=v1.0.0
+GOTESTSUMVERSION?=v1.8.2
+GOJUNITVERSION?=v2.0.0
+PROTOCGENGOVERSION?=v1.28
+PROTOCGENGOGRPCVERSION?=v1.2
 
 CIARTIFACTS?=ci-artifacts
 COVERAGEOUT?=coverage.out
@@ -42,7 +44,7 @@ prepare: install-tools go-vendor ## Initialize the go environment
 
 .PHONY: test
 test: prepare ## Run all go-sdk tests
-	gotestsum -f testname -- -v -cover -coverprofile=$(COVERAGEOUT) $(shell go list ./... | grep -v integration)
+	gotestsum -f testname -- -v -cover -run=$(regex) -coverprofile=$(COVERAGEOUT) $(shell go list ./... | grep -v integration)
 
 .PHONY: integration
 integration: build-cli-cross-platform integration-only ## Build and run integration tests
@@ -59,11 +61,11 @@ integration-only: install-tools ## Run integration tests
 	PATH="$(PWD)/bin:${PATH}" gotestsum -- -v github.com/lacework/go-sdk/integration -timeout 30m -tags="\
 		account \
 		agent_token \
+		alert \
 		alert_rule \
 		alert_channel \
 		alert_profile \
 		agent \
-		compliance \
 		configure \
 		container_registry \
 		query \
@@ -71,9 +73,9 @@ integration-only: install-tools ## Run integration tests
 		event \
 		help \
 		integration \
-		migration \
 		version \
 		generation \
+		compliance \
 		team_member \
 		component" -run=$(regex)
 		# Disable vulnerability tests until https://lacework.atlassian.net/browse/RAIN-37563 is resolved
@@ -134,11 +136,11 @@ fmt: ## Runs and applies go formatting changes
 
 .PHONY: fmt-check
 fmt-check: ## Lists formatting issues
-	@test -z $(shell gofmt -l $(shell go list -f {{.Dir}} ./...))
+	@test -z $(shell gofmt -l $(shell go list -f {{.Dir}} ./...) | grep -v proto)
 
 .PHONY: imports-check
 imports-check: ## Lists imports issues
-	@test -z $(shell goimports -l $(shell go list -f {{.Dir}} ./...))
+	@test -z $(shell goimports -l $(shell go list -f {{.Dir}} ./...) | grep -v proto)
 
 .PHONY: build-cli-cross-platform
 build-cli-cross-platform: ## Compiles the Lacework CLI for all supported platforms
@@ -160,6 +162,34 @@ generate-docs: ## *CI ONLY* Generates documentation
 .PHONY: test-resources
 test-resources: ## *CI ONLY* Prepares CI test containers
 	scripts/prepare_test_resources.sh all
+
+go-component-from := integration/test_resources/cdk/go-component/bin/go-component
+go-component-to := ~/.config/lacework/components/go-component/go-component
+
+.PHONY: cdk-go-component
+cdk-go-component: install-cli ## Creates a go-component for development
+	scripts/prepare_test_resources.sh go_component
+	lacework component dev go-component \
+		--type CLI_COMMAND --noninteractive \
+		--description 'A go-component for development'
+ifeq (x86_64, $(shell uname -m))
+	cp $(go-component-from)-$(shell uname -s | tr '[:upper:]' '[:lower:]')-amd64 $(go-component-to)
+else ifeq (arm64, $(shell uname -m))
+	cp $(go-component-from)-$(shell uname -s | tr '[:upper:]' '[:lower:]')-arm64 $(go-component-to)
+else
+	cp $(go-component-from)-$(shell uname -s | tr '[:upper:]' '[:lower:]')-386 $(go-component-to)
+endif
+	lacework component list
+
+.PHONY: protoc-go
+protoc-go: install-tools ## Generates code from proto files inside 'cli/cdk'
+	protoc --go_out=./cli/cdk/go --go_opt=paths=source_relative \
+		--go-grpc_out=./cli/cdk/go --go-grpc_opt=paths=source_relative \
+		proto/v1/*.proto
+
+protoc-python: install-tools
+	python3 -m grpc_tools.protoc -I. --python_out=./cli/cdk/python \
+		--grpc_python_out=./cli/cdk/python proto/v1/*.proto
 
 .PHONY: install-cli
 install-cli: build-cli-cross-platform ## Build and install the Lacework CLI binary at /usr/local/bin/lacework
@@ -189,6 +219,12 @@ ifeq (, $(shell which gox))
 endif
 ifeq (, $(shell which gotestsum))
 	GOFLAGS=-mod=readonly go install gotest.tools/gotestsum@$(GOTESTSUMVERSION)
+endif
+ifeq (, $(shell which protoc-gen-go))
+	GOFLAGS=-mod=readonly go install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTOCGENGOVERSION)
+endif
+ifeq (, $(shell which protoc-gen-go-grpc))
+	GOFLAGS=-mod=readonly go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(PROTOCGENGOGRPCVERSION)
 endif
 
 .PHONY: uninstall-tools

@@ -43,7 +43,6 @@ const MaxCacheSize = 1024 * 1024 * 1024
 // cli.Cache.Write("data", []byte("cool update"))     // Update
 // cli.Cache.Erase("data")                            // Delete
 // ```
-//
 func (c *cliState) InitCache(d ...string) {
 	if len(d) == 0 {
 		dir, err := cache.CacheDir()
@@ -146,12 +145,21 @@ func (c *cliState) ReadCachedToken() {
 	}
 }
 
+// return true if the cached token is expired or will expire within
+// the eminent duration (i.e. 10 seconds)
+func (c *cliState) cachedTokenExpiryEminent() bool {
+	eminentDuration := -10 * time.Second
+	// only consider the tokenCache expiry time if we actually have a cached token
+	return c.tokenCache.Token != "" && c.tokenCache.ExpiresAt.Before(time.Now().Add(eminentDuration))
+}
+
 func (c *cliState) WriteCachedToken() error {
 	if c.noCache {
 		return nil
 	}
-
-	if c.Token == "" {
+	// if we don't have a token or the cached token expiry is eminent
+	// then attempt to refresh it...
+	if c.Token == "" || c.cachedTokenExpiryEminent() {
 		response, err := c.LwApi.GenerateToken()
 		if err != nil {
 			return err
@@ -232,9 +240,11 @@ func (c *cliState) WriteAssetToCache(key string, expiresAt time.Time, data inter
 //
 // ```go
 // var report vulnReport
-// if expired := cli.ReadCachedAsset("my-report", &report); !expired {
-//     fmt.Printf("My report: %v\n", report)
-// }
+//
+//	if expired := cli.ReadCachedAsset("my-report", &report); !expired {
+//	    fmt.Printf("My report: %v\n", report)
+//	}
+//
 // ```
 func (c *cliState) ReadCachedAsset(key string, data interface{}) bool {
 	if c.noCache {

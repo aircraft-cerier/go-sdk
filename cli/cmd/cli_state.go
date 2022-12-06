@@ -36,8 +36,10 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 
 	"github.com/lacework/go-sdk/api"
+	cdk "github.com/lacework/go-sdk/cli/cdk/go/proto/v1"
 	"github.com/lacework/go-sdk/internal/format"
 	"github.com/lacework/go-sdk/lwcomponent"
 	"github.com/lacework/go-sdk/lwconfig"
@@ -63,18 +65,25 @@ type cliState struct {
 	Cache        *diskv.Diskv
 	LwComponents *lwcomponent.State
 
-	id             string
-	workers        sync.WaitGroup
-	spinner        *spinner.Spinner
-	jsonOutput     bool
-	yamlOutput     bool
-	csvOutput      bool
-	nonInteractive bool
-	noCache        bool
-	lqlOperator    string
-	profileDetails map[string]interface{}
-	tokenCache     api.TokenData
-	installedCmd   bool
+	id              string
+	workers         sync.WaitGroup
+	spinner         *spinner.Spinner
+	jsonOutput      bool
+	yamlOutput      bool
+	csvOutput       bool
+	nonInteractive  bool
+	noCache         bool
+	lqlOperator     string
+	profileDetails  map[string]interface{}
+	tokenCache      api.TokenData
+	installedCmd    bool
+	componentParser componentArgParser
+
+	// Implements core proto service
+	cdk.UnimplementedCoreServer
+
+	// Allows only one gRPC Server
+	cdkServer *grpc.Server
 }
 
 // NewDefaultState creates a new cliState with some defaults
@@ -415,16 +424,6 @@ func (c *cliState) HumanOutput() bool {
 // CSVOutput returns true if the cli is configured to display csv output
 func (c *cliState) CSVOutput() bool {
 	return c.csvOutput
-}
-
-func (c *cliState) envs() []string {
-	return []string{
-		fmt.Sprintf("LW_ACCOUNT=%s", c.Account),
-		fmt.Sprintf("LW_SUBACCOUNT=%s", c.Subaccount),
-		fmt.Sprintf("LW_API_KEY=%s", c.KeyID),
-		fmt.Sprintf("LW_API_SECRET=%s", c.Secret),
-		fmt.Sprintf("LW_API_TOKEN=%s", c.Token),
-	}
 }
 
 // loadStateFromViper loads parameters and environment variables

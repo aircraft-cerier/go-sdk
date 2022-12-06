@@ -36,40 +36,20 @@ type AWSRunner struct {
 	Region           string
 	AvailabilityZone string
 	InstanceID       string
+	ImageName        string
 }
 
-func NewAWSRunner(amiImageId, host, region, availabilityZone, instanceID string, callback ssh.HostKeyCallback) (*AWSRunner, error) {
+func NewAWSRunner(amiImageId, userFromCLIArg, host, region, availabilityZone, instanceID string, callback ssh.HostKeyCallback) (*AWSRunner, error) {
 	// Look up the AMI name of the runner
-	cfg, err := config.LoadDefaultConfig(context.Background())
+	imageName, err := getAMIName(amiImageId, region)
 	if err != nil {
 		return nil, err
-	}
-	svc := ec2.NewFromConfig(cfg)
-	input := ec2.DescribeImagesInput{
-		ImageIds: []string{
-			amiImageId,
-		},
-	}
-	result, err := svc.DescribeImages(context.Background(), &input)
-	if err != nil {
-		return nil, err
-	}
-	if len(result.Images) != 1 {
-		return nil, fmt.Errorf("expected to find only one AMI")
 	}
 
 	// Heuristically assign SSH username based on AMI name
-	var user string
-	if strings.Contains(*result.Images[0].Name, "ubuntu") {
-		user = "ubuntu"
-	} else if strings.Contains(*result.Images[0].Name, "amazon_linux") {
-		user = "ec2-user"
-	} else {
-		return nil, fmt.Errorf("expected either Ubuntu or Amazon Linux 2 AMI, got AMI %s", *result.Images[0].Name)
-	}
-
-	if os.Getenv("LW_SSH_USER") != "" {
-		user = os.Getenv("LW_SSH_USER")
+	detectedUsername, err := getSSHUsername(userFromCLIArg, imageName)
+	if err != nil {
+		return nil, err
 	}
 
 	defaultCallback, err := DefaultKnownHosts()
@@ -77,13 +57,14 @@ func NewAWSRunner(amiImageId, host, region, availabilityZone, instanceID string,
 		callback = defaultCallback
 	}
 
-	runner := New(user, host, callback)
+	runner := New(detectedUsername, host, callback)
 
 	return &AWSRunner{
 		*runner,
 		region,
 		availabilityZone,
 		instanceID,
+		imageName,
 	}, nil
 }
 
@@ -133,4 +114,66 @@ func (run AWSRunner) SendPublicKey(pubBytes []byte) error {
 	}
 
 	return nil
+}
+
+// getAMIName takes an AMI image ID and an AWS region name as input
+// and calls the AWS API to get the name of the AMI. Returns the AMI
+// name or an error if unsuccessful.
+func getAMIName(amiImageId, region string) (string, error) {
+	cfg, err := config.LoadDefaultConfig(context.Background())
+	if err != nil {
+		return "", err
+	}
+	cfg.Region = region
+	svc := ec2.NewFromConfig(cfg)
+	input := ec2.DescribeImagesInput{
+		ImageIds: []string{
+			amiImageId,
+		},
+	}
+	result, err := svc.DescribeImages(context.Background(), &input)
+	if err != nil {
+		return "", err
+	}
+	if len(result.Images) != 1 {
+		return "", fmt.Errorf("expected to find only one AMI, instead found %v", result.Images)
+	}
+
+	return *result.Images[0].Name, nil
+}
+
+// getSSHUsername takes any username passed as a CLI arg,
+// an AMI image name, a shell environment, and returns
+// the username for SSHing into the AWS runner or the empty
+// string and an error if the AMI is not supported.
+// It first checks if `LW_SSH_USER` is set and returns it if so.
+// Then it checks the AMI image name to heuristically determine the
+// SSH username.
+func getSSHUsername(userFromCLIArg, imageName string) (string, error) {
+	if userFromCLIArg != "" { // from CLI arg
+		return userFromCLIArg, nil
+	}
+	usernameLUT := getSSHUsernameLookupTable()
+	for _, matchFn := range usernameLUT {
+		if match, foundName := matchFn(imageName); match {
+			return foundName, nil
+		}
+	}
+	// No matching AMI found, return an error
+	return "", fmt.Errorf("no SSH username found for AMI %s, set as arg or shell env", imageName)
+}
+
+// getSSHUsernameLookupTable returns a lookup table for heuristically
+// determining SSH username based on AMI.
+// The first row of the table it returns is a function that checks
+// `LW_SSH_USER` in the shell environment.
+func getSSHUsernameLookupTable() []func(string) (bool, string) {
+	return []func(string) (bool, string){
+		func(_ string) (bool, string) { return os.Getenv("LW_SSH_USER") != "", os.Getenv("LW_SSH_USER") }, // THIS ROW MUST BE FIRST IN THE TABLE
+		func(imageName string) (bool, string) { return strings.Contains(imageName, "ubuntu"), "ubuntu" },
+		func(imageName string) (bool, string) {
+			return strings.Contains(imageName, "amazon_linux"), "ec2-user"
+		},
+		func(imageName string) (bool, string) { return strings.Contains(imageName, "amzn2-ami"), "ec2-user" },
+	}
 }

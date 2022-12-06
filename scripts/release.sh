@@ -198,6 +198,7 @@ update_changelog() {
 
 release_contains_features() {
   latest_version=$(find_latest_version)
+  log "found latest version: $latest_version"
   git log --no-merges --pretty="%s" ${latest_version}..main | grep "feat[:(]" >/dev/null
   return $?
 }
@@ -297,6 +298,9 @@ open_pull_request() {
   curl -XPOST -H "Authorization: token $GITHUB_TOKEN" --data  "@$_body" \
         https://api.github.com/repos/${org_name}/${project_name}/pulls > $_pr
 
+  # @afiune just to debug the issue where the field `html_url` comes as `null`
+  echo "$_pr" | jq .
+
   _pr_url=$(jq .html_url $_pr)
   log ""
   log "It is time to review the release!"
@@ -338,7 +342,7 @@ find_latest_version() {
   local _pattern="v[0-9]\+.[0-9]\+.[0-9]\+"
   local _versions
   _versions=$(git ls-remote --tags --quiet | grep $_pattern | tr '/' ' ' | awk '{print $NF}')
-  echo "$_versions" | tr '.' ' ' | sort -nr -k 1 -k 2 -k 3 | tr ' ' '.' | head -1
+  echo "$_versions" | tr '.' ' ' | sort -r -V | tr ' ' '.' | head -1
 }
 
 add_tag_version() {

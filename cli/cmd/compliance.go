@@ -31,14 +31,11 @@ import (
 
 	"github.com/lacework/go-sdk/api"
 	"github.com/lacework/go-sdk/internal/array"
+	"github.com/lacework/go-sdk/lwseverity"
 )
 
 var (
 	compCmdState = struct {
-		// the report type to display, supported are: CIS, SOC, or PCI
-		// default: CIS
-		Type string
-
 		// download report in PDF format
 		Pdf bool
 
@@ -62,7 +59,7 @@ var (
 
 		// output resources affected by recommendationID
 		RecommendationID string
-	}{Type: "CIS"}
+	}{}
 
 	RecommendationIDRegex = "^[A-Z]+[A-Z_]*[0-9]*"
 
@@ -180,7 +177,7 @@ func init() {
 	complianceCmd.AddCommand(complianceGcpCmd)
 }
 
-func complianceReportSummaryTable(summaries []api.ComplianceSummary) [][]string {
+func complianceReportSummaryTable(summaries []api.ReportSummary) [][]string {
 	if len(summaries) == 0 {
 		return [][]string{}
 	}
@@ -194,7 +191,7 @@ func complianceReportSummaryTable(summaries []api.ComplianceSummary) [][]string 
 	}
 }
 
-func complianceReportRecommendationsTable(recommendations []api.ComplianceRecommendation) [][]string {
+func complianceReportRecommendationsTable(recommendations []api.RecommendationV2) [][]string {
 	out := [][]string{}
 	for _, recommend := range recommendations {
 		out = append(out, []string{
@@ -209,7 +206,7 @@ func complianceReportRecommendationsTable(recommendations []api.ComplianceRecomm
 	}
 
 	sort.Slice(out, func(i, j int) bool {
-		return severityOrder(out[i][3]) < severityOrder(out[j][3])
+		return api.SeverityOrder(out[i][3]) < api.SeverityOrder(out[j][3])
 	})
 
 	return out
@@ -235,7 +232,7 @@ type complianceCSVReportDetails struct {
 	ReportTime time.Time
 
 	// Recommendations
-	Recommendations []api.ComplianceRecommendation
+	Recommendations []api.RecommendationV2
 }
 
 func (c complianceCSVReportDetails) GetAccountDetails() []string {
@@ -302,7 +299,7 @@ func complianceCSVReportRecommendationsTable(details *complianceCSVReportDetails
 	}
 
 	sort.Slice(out, func(i, j int) bool {
-		return severityOrder(out[i][3]) < severityOrder(out[j][3])
+		return api.SeverityOrder(out[i][3]) < api.SeverityOrder(out[j][3])
 	})
 
 	return out
@@ -379,8 +376,8 @@ func buildComplianceReportTable(detailsTable, summaryTable, recommendationsTable
 	return mainReport.String()
 }
 
-func filterRecommendations(recommendations []api.ComplianceRecommendation) ([]api.ComplianceRecommendation, string) {
-	var filtered []api.ComplianceRecommendation
+func filterRecommendations(recommendations []api.RecommendationV2) ([]api.RecommendationV2, string) {
+	var filtered []api.RecommendationV2
 	for _, r := range recommendations {
 		if matchRecommendationsFilters(r) {
 			filtered = append(filtered, r)
@@ -394,12 +391,12 @@ func filterRecommendations(recommendations []api.ComplianceRecommendation) ([]ap
 	return filtered, fmt.Sprintf("%v of %v recommendations showing \n", len(filtered), len(recommendations))
 }
 
-func matchRecommendationsFilters(r api.ComplianceRecommendation) bool {
+func matchRecommendationsFilters(r api.RecommendationV2) bool {
 	var results []bool
 
 	// severity returns specified threshold and above
 	if compCmdState.Severity != "" {
-		sevThreshold, _ := severityToProperTypes(compCmdState.Severity)
+		sevThreshold, _ := lwseverity.Normalize(compCmdState.Severity)
 		results = append(results, r.Severity <= sevThreshold)
 	}
 
@@ -448,7 +445,7 @@ func validRecommendationID(s string) bool {
 	return match
 }
 
-func outputResourcesByRecommendationID(report api.CloudComplianceReport) error {
+func outputResourcesByRecommendationID(report api.CloudComplianceReportV2) error {
 	recommendation := report.GetComplianceRecommendation(compCmdState.RecommendationID)
 	violations := recommendation.Violations
 	affectedResources := len(recommendation.Violations)
@@ -495,9 +492,34 @@ func outputResourcesByRecommendationID(report api.CloudComplianceReport) error {
 	return nil
 }
 
-func violationsToTable(violations []api.ComplianceViolation) (resourceTable [][]string) {
+func violationsToTable(violations []api.ComplianceViolationV2) (resourceTable [][]string) {
 	for _, v := range violations {
 		resourceTable = append(resourceTable, []string{v.Resource, v.Region, strings.Join(v.Reasons, ",")})
 	}
 	return
+}
+
+// nolint
+func getReportTypes(reportSubType string) (validTypes []string, err error) {
+	cacheKey := fmt.Sprintf("reports/definitions/%s", reportSubType)
+	expired := cli.ReadCachedAsset(cacheKey, &validTypes)
+
+	if expired {
+		cli.StartProgress("fetching valid report types...")
+		reportDefinitions, err := cli.LwApi.V2.ReportDefinitions.List()
+		cli.StopProgress()
+
+		if err != nil {
+			return nil, err
+		}
+
+		for _, report := range reportDefinitions.Data {
+			if report.SubReportType == reportSubType {
+				validTypes = append(validTypes, report.ReportNotificationType)
+			}
+		}
+		cli.WriteAssetToCache(cacheKey, time.Now().Add(time.Minute*30), validTypes)
+	}
+
+	return validTypes, err
 }

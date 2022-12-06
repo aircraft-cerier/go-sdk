@@ -82,8 +82,16 @@ func (c Component) run(cmd *exec.Cmd) error {
 		}
 
 		if err := cmd.Run(); err != nil {
+			if exitError, ok := err.(*exec.ExitError); ok {
+				return &RunError{
+					Err:      err,
+					Message:  baseRunErr,
+					ExitCode: exitError.ExitCode(),
+				}
+			}
 			return errors.Wrap(err, baseRunErr)
 		}
+
 		return nil
 	}
 

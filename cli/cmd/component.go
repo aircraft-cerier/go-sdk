@@ -32,6 +32,13 @@ import (
 	"github.com/lacework/go-sdk/lwcomponent"
 )
 
+const componentTypeAnnotation string = "component"
+
+var cdkDevState = struct {
+	Type        string
+	Description string
+}{}
+
 var (
 	// componentsCmd represents the components command
 	componentsCmd = &cobra.Command{
@@ -100,6 +107,22 @@ func init() {
 	componentsCmd.AddCommand(componentsUninstallCmd)
 	componentsCmd.AddCommand(componentsDevModeCmd)
 
+	componentsDevModeCmd.Flags().StringVar(
+		&cdkDevState.Type,
+		"type", "",
+		fmt.Sprintf("component type (%s, %s, %s)",
+			lwcomponent.BinaryType,
+			lwcomponent.CommandType,
+			lwcomponent.LibraryType,
+		),
+	)
+
+	componentsDevModeCmd.Flags().StringVar(
+		&cdkDevState.Description,
+		"description", "",
+		"component description",
+	)
+
 	// load components dynamically
 	cli.LoadComponents()
 }
@@ -115,7 +138,7 @@ func hasInstalledCommands() bool {
 // if the command was installed from the CDK
 func isComponent(annotations map[string]string) bool {
 	t, found := annotations["type"]
-	if found && t == "component" {
+	if found && t == componentTypeAnnotation {
 		return true
 	}
 	return false
@@ -141,9 +164,8 @@ func (c *cliState) LoadComponents() {
 
 			ver, err := component.CurrentVersion()
 			if err != nil {
-				c.Log.Warnw("unable to load dynamic cli command",
-					"component", component.Name,
-					"error", err.Error(),
+				c.Log.Errorw("unable to load dynamic cli command",
+					"component", component.Name, "error", err,
 				)
 				continue
 			}
@@ -153,21 +175,31 @@ func (c *cliState) LoadComponents() {
 			)
 			rootCmd.AddCommand(
 				&cobra.Command{
-					// @afiune strip `lw-` from component?
 					Use:                   component.Name,
 					Short:                 component.Description,
-					Annotations:           map[string]string{"type": "component"},
+					Annotations:           map[string]string{"type": componentTypeAnnotation},
 					Version:               ver.String(),
+					SilenceUsage:          true,
 					DisableFlagParsing:    true,
 					DisableFlagsInUseLine: true,
 					RunE: func(cmd *cobra.Command, args []string) error {
-						cli.Log.Debugw("running component", "component", cmd.Use, "args", args)
-						f, ok := cli.LwComponents.GetComponent(cmd.Use)
+						go func() {
+							// Start the gRPC server for components to communicate back
+							if err := c.Serve(c.GrpcTarget()); err != nil {
+								c.Log.Errorw("couldn't serve gRPC server", "error", err)
+							}
+						}()
+
+						c.Log.Debugw("running component", "component", cmd.Use,
+							"args", c.componentParser.componentArgs,
+							"cli_flags", c.componentParser.cliArgs)
+						f, ok := c.LwComponents.GetComponent(cmd.Use)
 						if ok {
-							// @afiune what if the component needs other env variables
-							envs := []string{fmt.Sprintf("LW_COMPONENT_NAME=%s", cmd.Use)}
+							envs := []string{
+								fmt.Sprintf("LW_COMPONENT_NAME=%s", cmd.Use),
+							}
 							envs = append(envs, c.envs()...)
-							return f.RunAndOutput(args, envs...)
+							return f.RunAndOutput(c.componentParser.componentArgs, envs...)
 						}
 
 						// We will land here only if we couldn't run the component, which is not
@@ -180,6 +212,7 @@ func (c *cliState) LoadComponents() {
 		}
 	}
 }
+
 func runComponentsList(_ *cobra.Command, _ []string) (err error) {
 	cli.StartProgress("Loading components state...")
 	cli.LwComponents, err = lwcomponent.LoadState(cli.LwApi)
@@ -443,31 +476,36 @@ func runComponentsDevMode(_ *cobra.Command, args []string) error {
 			color.HiYellowString(component.Name))
 
 		var (
-			cType   string
 			helpMsg = fmt.Sprintf("What are these component types ?\n"+
 				"\n'%s' - A regular standalone-binary (this component type is not accessible via the CLI)"+
 				"\n'%s' - A binary accessible via the Lacework CLI (Users will run 'lacework <COMPONENT_NAME>')"+
 				"\n'%s' - A library that only provides content for the CLI or other components\n",
 				lwcomponent.BinaryType, lwcomponent.CommandType, lwcomponent.LibraryType)
 		)
-		if err := survey.AskOne(&survey.Select{
-			Message: "Select the type of component you are developing:",
-			Help:    helpMsg,
-			Options: []string{
-				lwcomponent.BinaryType,
-				lwcomponent.CommandType,
-				lwcomponent.LibraryType,
-			},
-		}, &cType); err != nil {
-			return err
+		if cdkDevState.Type == "" {
+			if err := survey.AskOne(&survey.Select{
+				Message: "Select the type of component you are developing:",
+				Help:    helpMsg,
+				Options: []string{
+					lwcomponent.BinaryType,
+					lwcomponent.CommandType,
+					lwcomponent.LibraryType,
+				},
+			}, &cdkDevState.Type); err != nil {
+				return err
+			}
 		}
 
-		component.Type = lwcomponent.Type(cType)
+		component.Type = lwcomponent.Type(cdkDevState.Type)
 
-		if err := survey.AskOne(&survey.Input{
-			Message: "What is this component about? (component description):",
-		}, &component.Description); err != nil {
-			return err
+		if cdkDevState.Description == "" {
+			if err := survey.AskOne(&survey.Input{
+				Message: "What is this component about? (component description):",
+			}, &component.Description); err != nil {
+				return err
+			}
+		} else {
+			component.Description = cdkDevState.Description
 		}
 	}
 
