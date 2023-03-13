@@ -120,7 +120,7 @@ func userFriendlyErrorForOnDemandCtrVulnScan(err error, registry, repo, tag stri
 
 Get started by integrating your container registry using the command:
 
-    lacework integration create
+    lacework container-registry create
 
 If you prefer to configure the integration via the WebUI, log in to your account at:
 
@@ -139,7 +139,7 @@ Your account has the following container registries configured:
 
 To integrate a new container registry use the command:
 
-    lacework integration create
+    lacework container-registry create
 `
 		return errors.New(fmt.Sprintf(msg, registry, strings.Join(registries, "\n    > ")))
 	}
@@ -168,22 +168,15 @@ To view all container registries configured in your account use the command:
 
 func pollScanStatus(requestID string, args []string) error {
 	cli.StartProgress(" Scan running...")
-	time.Sleep(time.Second * 64)
+	time.Sleep(time.Second * 40)
 	var (
 		retries      = 0
-		start        = time.Now()
+		start        = time.Now().UTC()
 		durationTime = start
 		expPollTime  = time.Second
 		params       = map[string]interface{}{"request_id": requestID}
 	)
 
-	// @afiune bug: there are sometimes that the API returns the scan status as
-	// successful without any vulnerabilities, as if the assessment had none, but
-	// if you query it again, the assessment does have vulnerabilities.
-	//
-	// JIRA: RAIN-12964
-	// Workaround: Retry the polling mechanism twice on success :(
-	bugRetry := true
 	for {
 		retries++
 		params["retries"] = retries
@@ -194,14 +187,14 @@ func pollScanStatus(requestID string, args []string) error {
 		cli.Event.Feature = featPollCtrScan
 		cli.Event.FeatureData = params
 
-		err, retry := checkScanStatus(requestID)
+		evalGUID, err := checkScanStatus(requestID)
 		if err != nil {
 			cli.Event.Error = err.Error()
 			cli.SendHoneyvent()
 			return err
 		}
 
-		if retry {
+		if evalGUID == "" {
 			cli.Log.Debugw("waiting for a retry", "request_id", requestID, "sleep", expPollTime)
 			cli.SendHoneyvent()
 			time.Sleep(expPollTime)
@@ -209,23 +202,9 @@ func pollScanStatus(requestID string, args []string) error {
 			continue
 		}
 
-		// @afiune bug: there are sometimes that the API returns the scan status as
-		// successful without any vulnerabilities, as if the assessment had none, but
-		// if you query it again, the assessment does have vulnerabilities.
-		//
-		// JIRA: RAIN-12964
-		// Workaround: Retry the polling mechanism twice on success :(
-		if bugRetry {
-			bugRetry = false
-			cli.SendHoneyvent()
-			// we do NOT use the exponential polling time here since this is just a
-			// workaround and therefore waiting for 5s or so is enough time
-			time.Sleep(time.Second * 5)
-			continue
-		}
-
 		cli.Event.DurationMs = time.Since(durationTime).Milliseconds()
 		params["total_duration_ms"] = time.Since(start).Milliseconds()
+		params["eval_guid"] = evalGUID
 		cli.Event.FeatureData = params
 		cli.SendHoneyvent()
 
@@ -235,40 +214,96 @@ func pollScanStatus(requestID string, args []string) error {
 
 		cli.StopProgress()
 
-		// scan is completed, request results
-		err = showContainerAssessmentsWithSha256("", api.SearchFilter{
-			Filters: []api.Filter{{
-				Expression: "eq",
-				Field:      "evalCtx.image_info.registry",
-				Value:      args[0],
+		// scan is completed, fetch results using the Search() API but avoid
+		// using a time range of 7 days and instead just pass the last 24 hours
+		now := time.Now().UTC()
+		before := now.AddDate(0, 0, -1) // 1 day from now
+		filter := api.SearchFilter{
+			TimeFilter: &api.TimeFilter{
+				StartTime: &before,
+				EndTime:   &now,
 			},
+			Filters: []api.Filter{
+				{
+					Expression: "eq",
+					Field:      "evalCtx.image_info.registry",
+					Value:      args[0],
+				},
+				{
+					Expression: "eq",
+					Field:      "evalGuid",
+					Value:      evalGUID,
+				},
 				{
 					Expression: "eq",
 					Field:      "evalCtx.image_info.repo",
 					Value:      args[1],
 				},
+				{
+					Expression: "eq",
+					Field:      "evalCtx.is_reeval",
+					Value:      "false",
+				},
+				{
+					Expression: "eq",
+					Field:      "evalCtx.scan_request_props.reqId",
+					Value:      requestID,
+				},
+				{
+					Expression: "eq",
+					Field:      getTagOrDigestField(args[2]),
+					Value:      args[2],
+				},
 			},
-		})
-		return err
+		}
+
+		cli.Log.Debugw("retrieve assessment", "filters", filter.Filters)
+
+		cli.StartProgress("Fetching assessment results...")
+		assessment, err := cli.LwApi.V2.Vulnerabilities.Containers.Search(filter)
+		cli.StopProgress()
+		if err != nil {
+			return errors.Wrap(err, "unable to fetch assessment results")
+		}
+
+		if len(assessment.Data) == 0 {
+			return errors.Errorf(
+				"unable to fetch assessment results from evaluation with id '%s'", evalGUID,
+			)
+		}
+
+		return outputContainerVulnerabilityAssessment(assessment)
 	}
 }
 
-func checkScanStatus(requestID string) (error, bool) {
+func getTagOrDigestField(arg string) string {
+	// Check if we need to search for a digest or a tag id
+	if strings.HasPrefix(arg, "sha256:") {
+		return "evalCtx.image_info.digest"
+	}
+	return "evalCtx.image_info.tags[0]"
+}
+
+// checkScanStatus returns the evaluation GUID once the scan is completed,
+// if it is not completed, it returns an empty string
+func checkScanStatus(requestID string) (string, error) {
 	cli.Log.Infow("verifying status of vulnerability scan", "request_id", requestID)
 	scan, err := cli.LwApi.V2.Vulnerabilities.Containers.ScanStatus(requestID)
 	if err != nil {
-		return errors.Wrap(err, "unable to verify status of the vulnerability scan"), false
+		return "", errors.Wrap(err, "unable to verify status of the vulnerability scan")
 	}
 
 	cli.Log.Debugw("vulnerability scan", "details", scan)
 	status := scan.CheckStatus()
 	switch status {
 	case "completed":
-		return nil, false
+		cli.Log.Infow("vulnerability scan completed",
+			"request_id", requestID, "eval_guid", scan.Data.EvalGuid)
+		return scan.Data.EvalGuid, nil
 	case "scanning":
-		return nil, true
+		return "", nil
 	default:
-		return errors.Errorf(
-			"unable to get status: '%s' from vulnerability scan. Use '--debug' to troubleshoot.", status), false
+		return "", errors.Errorf(
+			"unable to get status: '%s' from vulnerability scan. Use '--debug' to troubleshoot.", status)
 	}
 }

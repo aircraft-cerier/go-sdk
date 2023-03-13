@@ -21,9 +21,8 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
-	"github.com/AlecAivazis/survey/v2"
+	"github.com/Masterminds/semver"
 	"github.com/fatih/color"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
@@ -33,11 +32,6 @@ import (
 )
 
 const componentTypeAnnotation string = "component"
-
-var cdkDevState = struct {
-	Type        string
-	Description string
-}{}
 
 var (
 	// componentsCmd represents the components command
@@ -56,6 +50,15 @@ var (
 		Short:   "List all components",
 		Long:    `List all available components and their current state`,
 		RunE:    runComponentsList,
+	}
+
+	// componentsShowCmd represents the show sub-command inside the components command
+	componentsShowCmd = &cobra.Command{
+		Use:   "show <component>",
+		Short: "Show details about a component",
+		Long:  "Show details about a component",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runComponentsShow,
 	}
 
 	// componentsInstallCmd represents the install sub-command inside the components command
@@ -94,34 +97,26 @@ var (
 		Args:   cobra.ExactArgs(1),
 		RunE:   runComponentsDevMode,
 	}
+
+	versionArg string
 )
 
 func init() {
 	// add the components command
 	rootCmd.AddCommand(componentsCmd)
 
+	componentsInstallCmd.PersistentFlags().StringVar(&versionArg, "version", "",
+		"require a specific version to be installed (default is latest)")
+	componentsUpdateCmd.PersistentFlags().StringVar(&versionArg, "version", "",
+		"update to a specific version (default is latest)")
+
 	// add sub-commands to the components command
 	componentsCmd.AddCommand(componentsListCmd)
+	componentsCmd.AddCommand(componentsShowCmd)
 	componentsCmd.AddCommand(componentsInstallCmd)
 	componentsCmd.AddCommand(componentsUpdateCmd)
 	componentsCmd.AddCommand(componentsUninstallCmd)
 	componentsCmd.AddCommand(componentsDevModeCmd)
-
-	componentsDevModeCmd.Flags().StringVar(
-		&cdkDevState.Type,
-		"type", "",
-		fmt.Sprintf("component type (%s, %s, %s)",
-			lwcomponent.BinaryType,
-			lwcomponent.CommandType,
-			lwcomponent.LibraryType,
-		),
-	)
-
-	componentsDevModeCmd.Flags().StringVar(
-		&cdkDevState.Description,
-		"description", "",
-		"component description",
-	)
 
 	// load components dynamically
 	cli.LoadComponents()
@@ -139,6 +134,22 @@ func hasInstalledCommands() bool {
 func isComponent(annotations map[string]string) bool {
 	t, found := annotations["type"]
 	if found && t == componentTypeAnnotation {
+		return true
+	}
+	return false
+}
+
+// IsComponentInstalled returns true if component is
+// valid and installed
+func (c *cliState) IsComponentInstalled(name string) bool {
+	var err error
+	c.LwComponents, err = lwcomponent.LocalState()
+	if err != nil || c.LwComponents == nil {
+		return false
+	}
+
+	component, found := c.LwComponents.GetComponent(name)
+	if found && component.IsInstalled() {
 		return true
 	}
 	return false
@@ -173,7 +184,7 @@ func (c *cliState) LoadComponents() {
 			c.Log.Debugw("loading dynamic cli command",
 				"component", component.Name, "version", ver,
 			)
-			rootCmd.AddCommand(
+			componentCmd :=
 				&cobra.Command{
 					Use:                   component.Name,
 					Short:                 component.Description,
@@ -183,9 +194,18 @@ func (c *cliState) LoadComponents() {
 					DisableFlagParsing:    true,
 					DisableFlagsInUseLine: true,
 					RunE: func(cmd *cobra.Command, args []string) error {
+						// cobra will automatically add a -v/--version flag to
+						// the command, but because for components we're not
+						// parsing the args at the usual point in time, we have
+						// to repeat the check for -v here
+						versionVal, _ := cmd.Flags().GetBool("version")
+						if versionVal {
+							cmd.Printf("%s version %s\n", cmd.Use, cmd.Version)
+							return nil
+						}
 						go func() {
 							// Start the gRPC server for components to communicate back
-							if err := c.Serve(c.GrpcTarget()); err != nil {
+							if err := c.Serve(); err != nil {
 								c.Log.Errorw("couldn't serve gRPC server", "error", err)
 							}
 						}()
@@ -207,8 +227,8 @@ func (c *cliState) LoadComponents() {
 						// happens, let the user know that we would love to hear their feedback
 						return errors.New("something went pretty wrong here, contact support@lacework.net")
 					},
-				},
-			)
+				}
+			rootCmd.AddCommand(componentCmd)
 		}
 	}
 }
@@ -247,6 +267,62 @@ func runComponentsList(_ *cobra.Command, _ []string) (err error) {
 	)
 
 	cli.OutputHuman("\nComponents version: %s\n", cli.LwComponents.Version)
+	return
+}
+
+func runComponentsShow(_ *cobra.Command, args []string) (err error) {
+	cli.StartProgress("Loading components state...")
+	cli.LwComponents, err = lwcomponent.LoadState(cli.LwApi)
+	cli.StopProgress()
+	if err != nil {
+		err = errors.Wrap(err, "unable to load state of components")
+		return
+	}
+	component, found := cli.LwComponents.GetComponent(args[0])
+	if !found {
+		return errors.New("component not found")
+	}
+	if cli.JSONOutput() {
+		return cli.OutputJSON(component)
+	}
+
+	var colorize *color.Color
+	switch component.Status() {
+	case lwcomponent.NotInstalled:
+		colorize = color.New(color.FgWhite, color.Bold)
+	case lwcomponent.Installed:
+		colorize = color.New(color.FgGreen, color.Bold)
+	case lwcomponent.UpdateAvailable:
+		colorize = color.New(color.FgYellow, color.Bold)
+	}
+
+	cli.OutputHuman(
+		renderCustomTable(
+			[]string{"Name", "Status", "Description"},
+			[][]string{{
+				component.Name,
+				colorize.Sprintf(component.Status().String()),
+				component.Description,
+			}},
+			tableFunc(func(t *tablewriter.Table) {
+				t.SetBorder(false)
+				t.SetColumnSeparator(" ")
+				t.SetAutoWrapText(false)
+				t.SetAlignment(tablewriter.ALIGN_LEFT)
+			}),
+		),
+	)
+	var currentVersion *semver.Version = nil
+	if component.Status() == lwcomponent.Installed || component.Status() == lwcomponent.UpdateAvailable {
+		installed, err := component.CurrentVersion()
+		if err != nil {
+			return err
+		}
+		currentVersion = installed
+	}
+	cli.OutputHuman("\n")
+	cli.OutputHuman(component.ListVersions(currentVersion))
+	cli.OutputHuman("\n")
 	return
 }
 
@@ -290,7 +366,7 @@ func runComponentsInstall(_ *cobra.Command, args []string) (err error) {
 	}
 
 	cli.StartProgress(fmt.Sprintf("Installing component %s...", component.Name))
-	err = cli.LwComponents.Install(args[0])
+	err = cli.LwComponents.Install(args[0], versionArg)
 	cli.StopProgress()
 	if err != nil {
 		err = errors.Wrap(err, "unable to install component")
@@ -316,6 +392,7 @@ func runComponentsInstall(_ *cobra.Command, args []string) (err error) {
 	if component.Breadcrumbs.InstallationMessage != "" {
 		cli.OutputHuman("\n")
 		cli.OutputHuman(component.Breadcrumbs.InstallationMessage)
+		cli.OutputHuman("\n")
 	}
 	return
 }
@@ -336,16 +413,15 @@ func runComponentsUpdate(_ *cobra.Command, args []string) (err error) {
 		return
 	}
 	// @afiune end boilerplate load components
-	update, err := component.UpdateAvailable()
-	if err != nil {
-		return err
-	}
 
-	if !update {
-		cli.OutputHuman(
-			"You are running the latest version of the component %s.\n", args[0],
-		)
-		return nil
+	updateTo := component.LatestVersion
+	if versionArg != "" {
+		parsedVersion, err := semver.NewVersion(versionArg)
+		if err != nil {
+			err = errors.Wrap(err, "invalid version specified")
+			return err
+		}
+		updateTo = *parsedVersion
 	}
 
 	currentVersion, err := component.CurrentVersion()
@@ -353,8 +429,13 @@ func runComponentsUpdate(_ *cobra.Command, args []string) (err error) {
 		return err
 	}
 
+	if currentVersion.Equal(&updateTo) {
+		cli.OutputHuman("You are already running version %s of this component", currentVersion.String())
+		return nil
+	}
+
 	cli.StartProgress(fmt.Sprintf("Updating component %s...", component.Name))
-	err = cli.LwComponents.Install(args[0])
+	err = cli.LwComponents.Install(args[0], updateTo.String())
 	cli.StopProgress()
 	if err != nil {
 		err = errors.Wrap(err, "unable to update component")
@@ -362,13 +443,13 @@ func runComponentsUpdate(_ *cobra.Command, args []string) (err error) {
 	}
 	cli.OutputChecklist(successIcon, "Component %s updated to %s\n",
 		color.HiYellowString(component.Name),
-		color.HiCyanString(fmt.Sprintf("v%s", component.LatestVersion.String())))
+		color.HiCyanString(fmt.Sprintf("v%s", updateTo.String())))
 	cli.OutputChecklist(successIcon, "Signature verified\n")
 
 	cli.StartProgress(fmt.Sprintf("Reconfiguring %s component...", component.Name))
 	// component life cycle: reconfigure
 	stdout, stderr, errCmd := component.RunAndReturn(
-		[]string{"cdk-reconfigure", currentVersion.String(), component.LatestVersion.String()},
+		[]string{"cdk-reconfigure", currentVersion.String(), updateTo.String()},
 		nil, cli.envs()...)
 	if errCmd != nil {
 		cli.Log.Warnw("component life cycle",
@@ -379,12 +460,9 @@ func runComponentsUpdate(_ *cobra.Command, args []string) (err error) {
 	cli.StopProgress()
 
 	cli.OutputChecklist(successIcon, "Component reconfigured\n")
-	cli.OutputHuman("\nUpdate completed.\n")
-
-	if component.Breadcrumbs.UpdateMessage != "" {
-		cli.OutputHuman("\n")
-		cli.OutputHuman(component.Breadcrumbs.UpdateMessage)
-	}
+	cli.OutputHuman("\n")
+	cli.OutputHuman(component.MakeUpdateMessage(*currentVersion, updateTo))
+	cli.OutputHuman("\n")
 	return
 }
 
@@ -417,8 +495,8 @@ func runComponentsDelete(_ *cobra.Command, args []string) (err error) {
 	}
 
 	cli.StartProgress("Cleaning component data...")
-	// component life cycle: remove
-	stdout, stderr, errCmd := component.RunAndReturn([]string{"cdk-remove"}, nil, cli.envs()...)
+	// component life cycle: cleanup
+	stdout, stderr, errCmd := component.RunAndReturn([]string{"cdk-cleanup"}, nil, cli.envs()...)
 	if errCmd != nil {
 		cli.Log.Warnw("component life cycle",
 			"error", errCmd.Error(), "stdout", stdout, "stderr", stderr)
@@ -451,80 +529,4 @@ func runComponentsDelete(_ *cobra.Command, args []string) (err error) {
 	cli.OutputHuman("\nDo you want to provide feedback?\n")
 	cli.OutputHuman("Reach out to us at %s\n", color.HiCyanString("support@lacework.net"))
 	return
-}
-
-func runComponentsDevMode(_ *cobra.Command, args []string) error {
-	cli.StartProgress("Loading components state...")
-	var err error
-	cli.LwComponents, err = lwcomponent.LoadState(cli.LwApi)
-	cli.StopProgress()
-	if err != nil {
-		return errors.Wrap(err, "unable to load components")
-	}
-
-	component, found := cli.LwComponents.GetComponent(args[0])
-	if !found {
-		component = &lwcomponent.Component{
-			Name: args[0],
-		}
-
-		if component.UnderDevelopment() {
-			return errors.New("component already under development.")
-		}
-
-		cli.OutputHuman("Component '%s' not found. Defining a new component.\n",
-			color.HiYellowString(component.Name))
-
-		var (
-			helpMsg = fmt.Sprintf("What are these component types ?\n"+
-				"\n'%s' - A regular standalone-binary (this component type is not accessible via the CLI)"+
-				"\n'%s' - A binary accessible via the Lacework CLI (Users will run 'lacework <COMPONENT_NAME>')"+
-				"\n'%s' - A library that only provides content for the CLI or other components\n",
-				lwcomponent.BinaryType, lwcomponent.CommandType, lwcomponent.LibraryType)
-		)
-		if cdkDevState.Type == "" {
-			if err := survey.AskOne(&survey.Select{
-				Message: "Select the type of component you are developing:",
-				Help:    helpMsg,
-				Options: []string{
-					lwcomponent.BinaryType,
-					lwcomponent.CommandType,
-					lwcomponent.LibraryType,
-				},
-			}, &cdkDevState.Type); err != nil {
-				return err
-			}
-		}
-
-		component.Type = lwcomponent.Type(cdkDevState.Type)
-
-		if cdkDevState.Description == "" {
-			if err := survey.AskOne(&survey.Input{
-				Message: "What is this component about? (component description):",
-			}, &component.Description); err != nil {
-				return err
-			}
-		} else {
-			component.Description = cdkDevState.Description
-		}
-	}
-
-	if err := component.EnterDevelopmentMode(); err != nil {
-		return errors.Wrap(err, "unable to enter development mode")
-	}
-
-	rPath, err := component.RootPath()
-	if err != nil {
-		return errors.New("unable to detect RootPath")
-	}
-
-	cli.OutputHuman("Component '%s' in now in development mode.\n\n",
-		color.HiYellowString(component.Name))
-	cli.OutputHuman("Root path: %s\n", rPath)
-	cli.OutputHuman("Dev specs: %s\n", filepath.Join(rPath, ".dev"))
-	if component.Type == lwcomponent.CommandType {
-		cli.OutputHuman("\nDeploy your dev component at: %s\n",
-			color.HiYellowString(filepath.Join(rPath, component.Name)))
-	}
-	return nil
 }

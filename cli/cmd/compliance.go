@@ -76,7 +76,7 @@ HIPAA benchmark standards.
 
 Get started by integrating one or more cloud accounts using the command:
 
-    lacework integration create
+    lacework cloud-account create
 
 If you prefer to configure the integration via the WebUI, log in to your account at:
 
@@ -86,7 +86,7 @@ Then navigate to Settings > Integrations > Cloud Accounts.
 
 Use the following command to list all available integrations in your account:
 
-    lacework integrations list
+    lacework cloud-account list
 `,
 	}
 
@@ -110,10 +110,6 @@ To get the latest Azure compliance assessment report, use the command:
     lacework compliance azure get-report <tenant_id> <subscription_id>
 
 These reports run on a regular schedule, typically once a day.
-
-To run an ad-hoc compliance assessment use the command:
-
-    lacework compliance azure run-assessment <tenant_id>
 `,
 	}
 
@@ -137,10 +133,6 @@ To get the latest GCP compliance assessment report, use the command:
     lacework compliance gcp get-report <organization_id> <project_id>
 
 These reports run on a regular schedule, typically once a day.
-
-To run an ad-hoc compliance assessment use the command:
-
-    lacework compliance gcp run-assessment <org_or_project_id>
 `,
 	}
 
@@ -159,10 +151,6 @@ To get the latest AWS compliance assessment report:
     lacework compliance aws get-report <account_id>
 
 These reports run on a regular schedule, typically once a day.
-
-To run an ad-hoc compliance assessment:
-
-    lacework compliance aws run-assessment <account_id>
 `,
 	}
 )
@@ -272,17 +260,20 @@ func complianceCSVReportRecommendationsTable(details *complianceCSVReportDetails
 	out := [][]string{}
 
 	for _, recommendation := range details.Recommendations {
-		for _, suppression := range recommendation.Suppressions {
-			out = append(out,
-				append(details.GetReportMetaData(),
-					recommendation.Category,
-					recommendation.RecID,
-					recommendation.Title,
-					"Suppressed",
-					recommendation.SeverityString(),
-					suppression,
-					"",
-					""))
+		// GROW-1266: Do not add if status flag filters suppressed
+		if compCmdState.Status == "" || compCmdState.Status == "suppressed" {
+			for _, suppression := range recommendation.Suppressions {
+				out = append(out,
+					append(details.GetReportMetaData(),
+						recommendation.Category,
+						recommendation.RecID,
+						recommendation.Title,
+						"Suppressed",
+						recommendation.SeverityString(),
+						suppression,
+						"",
+						""))
+			}
 		}
 		for _, violation := range recommendation.Violations {
 			out = append(out,
@@ -522,4 +513,15 @@ func getReportTypes(reportSubType string) (validTypes []string, err error) {
 	}
 
 	return validTypes, err
+}
+
+func prettyPrintReportTypes(reportTypes []string) string {
+	var sb strings.Builder
+	for i, r := range reportTypes {
+		if i%5 == 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString(fmt.Sprintf("'%s',", r))
+	}
+	return sb.String()
 }

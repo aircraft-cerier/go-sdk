@@ -77,9 +77,8 @@ integration-only: install-tools ## Run integration tests
 		generation \
 		compliance \
 		team_member \
+		vulnerability \
 		component" -run=$(regex)
-		# Disable vulnerability tests until https://lacework.atlassian.net/browse/RAIN-37563 is resolved
-		#vulnerability"
 
 .PHONY: integration-lql
 integration-lql: build-cli-cross-platform integration-lql-only ## Build and run lql integration tests
@@ -196,6 +195,8 @@ install-cli: build-cli-cross-platform ## Build and install the Lacework CLI bina
 ifeq (x86_64, $(shell uname -m))
 	mv bin/$(PACKAGENAME)-$(shell uname -s | tr '[:upper:]' '[:lower:]')-amd64 /usr/local/bin/$(CLINAME)
 else ifeq (arm64, $(shell uname -m))
+	mv bin/$(PACKAGENAME)-$(shell uname -s | tr '[:upper:]' '[:lower:]')-arm64 /usr/local/bin/$(CLINAME)
+else ifeq (aarch64, $(shell uname -m))
 	mv bin/$(PACKAGENAME)-$(shell uname -s | tr '[:upper:]' '[:lower:]')-arm64 /usr/local/bin/$(CLINAME)
 else
 	mv bin/$(PACKAGENAME)-$(shell uname -s | tr '[:upper:]' '[:lower:]')-386 /usr/local/bin/$(CLINAME)

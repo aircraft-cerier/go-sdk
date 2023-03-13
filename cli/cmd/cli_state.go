@@ -32,6 +32,7 @@ import (
 	"github.com/briandowns/spinner"
 	"github.com/fatih/color"
 	prettyjson "github.com/hokaccha/go-prettyjson"
+	"github.com/mattn/go-isatty"
 	"github.com/peterbourgon/diskv/v3"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
@@ -54,7 +55,6 @@ type cliState struct {
 	KeyID      string
 	Secret     string
 	Token      string
-	LogLevel   string
 	OrgLevel   bool
 	CfgVersion int
 
@@ -83,7 +83,8 @@ type cliState struct {
 	cdk.UnimplementedCoreServer
 
 	// Allows only one gRPC Server
-	cdkServer *grpc.Server
+	cdkServer     *grpc.Server
+	cdkServerPort int
 }
 
 // NewDefaultState creates a new cliState with some defaults
@@ -103,6 +104,8 @@ func NewDefaultState() *cliState {
 			Indent:      2,
 			Newline:     "\n",
 		},
+		nonInteractive: !isatty.IsTerminal(os.Stdout.Fd()),
+		cdkServerPort:  defaultGrpcPort,
 	}
 
 	// initialize honeycomb library and honeyvent
@@ -225,7 +228,7 @@ func (c *cliState) NewClient() error {
 	}
 
 	apiOpts := []api.Option{
-		api.WithLogLevel(c.LogLevel),
+		api.WithLogLevel(c.Log.Level().CapitalString()),
 		api.WithSubaccount(c.Subaccount),
 		api.WithApiKeys(c.KeyID, c.Secret),
 		api.WithTimeout(time.Second * 125),

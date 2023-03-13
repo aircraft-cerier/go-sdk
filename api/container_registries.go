@@ -73,6 +73,8 @@ func NewContainerRegistry(name string, regType containerRegistryType, data inter
 		reg.Data = verifyGhcrContainerRegistry(data)
 	case InlineScannerContainerRegistry:
 		reg.Data = verifyInlineScannerContainerRegistry(data)
+	case ProxyScannerContainerRegistry:
+		reg.Data = verifyProxyScannerContainerRegistry(data)
 	case AwsEcrContainerRegistry:
 		reg.Data = verifyAwsEcrContainerRegistry(data)
 	case DockerhubContainerRegistry:
@@ -106,6 +108,7 @@ const (
 	GcpGarContainerRegistry
 	GhcrContainerRegistry
 	InlineScannerContainerRegistry
+	ProxyScannerContainerRegistry
 	AwsEcrContainerRegistry
 	DockerhubContainerRegistry
 	DockerhubV2ContainerRegistry
@@ -118,6 +121,7 @@ var ContainerRegistryTypes = map[containerRegistryType]string{
 	GcpGarContainerRegistry:        "GCP_GAR",
 	GhcrContainerRegistry:          "GHCR",
 	InlineScannerContainerRegistry: "INLINE_SCANNER",
+	ProxyScannerContainerRegistry:  "PROXY_SCANNER",
 	AwsEcrContainerRegistry:        "AWS_ECR",
 	DockerhubContainerRegistry:     "DOCKERHUB",
 	DockerhubV2ContainerRegistry:   "V2_REGISTRY",
@@ -183,7 +187,22 @@ func (svc *ContainerRegistriesService) Get(guid string, response interface{}) er
 
 type ContainerRegistryRaw struct {
 	v2CommonIntegrationData
-	Data interface{} `json:"data,omitempty"`
+	Data        interface{}    `json:"data,omitempty"`
+	ServerToken *V2ServerToken `json:"serverToken,omitempty"`
+}
+
+func (reg ContainerRegistryRaw) StateString() string {
+	switch reg.ContainerRegistryType() {
+	case InlineScannerContainerRegistry, ProxyScannerContainerRegistry:
+		return "Ok"
+	default:
+		return reg.v2CommonIntegrationData.StateString()
+	}
+}
+
+type V2ServerToken struct {
+	ServerToken string `json:"serverToken"`
+	Uri         string `json:"uri"`
 }
 
 func (reg ContainerRegistryRaw) GetData() any {

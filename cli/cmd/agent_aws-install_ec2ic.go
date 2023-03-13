@@ -63,6 +63,10 @@ AWS credentials are read from the following environment variables:
 - AWS_SESSION_TOKEN (optional)
 - AWS_REGION (optional)
 
+This command will only install the agent on hosts that are supported by
+EC2InstanceConnect. The supported AMI types are Amazon Linux 2 and Ubuntu
+16.04 and later. There may also be a region restriction.
+
 This command will automatically add hosts with successful connections to
 '~/.ssh/known_hosts' unless specified with '--trust_host_key=false'.`,
 	}
@@ -113,7 +117,7 @@ func installAWSEC2IC(_ *cobra.Command, _ []string) error {
 		}
 	}
 
-	runners, err := awsDescribeInstances()
+	runners, err := awsDescribeInstances(true /* filter on SSH support */)
 	if err != nil {
 		return err
 	}
